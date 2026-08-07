@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ascendra Financial &mdash; Meta Ads Performance</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="brandbar">
+  <div class="brandbar-inner">
+    <div class="wordmark"><b>Ascendra</b><span>Financial</span></div>
+    <div class="brandbar-right">
+      <span class="brandbar-meta">META ADS PERFORMANCE</span>
+      <span class="whoami" id="whoami"></span>
+    </div>
+  </div>
+</header>
+
+<div class="pagehead">
+  <h1>Meta Ads Performance</h1>
+  <p>Cost per settlement, by the week a lead was generated &mdash; not the week it happened to settle.</p>
+  <span class="source-badge" id="source-badge">Loading data&hellip; (first connect to a new source can take up to ~45s)</span>
+</div>
+
+<nav class="filterbar">
+  <div class="filterbar-inner">
+    <label>Date range
+      <select id="f-preset">
+        <option value="today">Today</option>
+        <option value="yesterday">Yesterday</option>
+        <option value="last7">Last 7 days</option>
+        <option value="last14">Last 14 days</option>
+        <option value="last30">Last 30 days</option>
+        <option value="thisweek">This week</option>
+        <option value="lastweek">Last week</option>
+        <option value="thismonth">This month</option>
+        <option value="lastmonth">Last month</option>
+        <option value="last90" selected>Last 90 days</option>
+        <option value="lifetime">Lifetime</option>
+        <option value="custom">Custom range&hellip;</option>
+      </select>
+    </label>
+    <div class="custom-range" id="f-custom-wrap">
+      <label>From <input type="date" id="f-from"></label>
+      <label>To <input type="date" id="f-to"></label>
+    </div>
+    <span class="range-readout" id="range-readout"></span>
+    <label>Campaign <select id="f-campaign"></select></label>
+    <label>Audience <select id="f-audience"></select></label>
+    <label>Creative <select id="f-creative"></select></label>
+    <label>Landing Page <select id="f-landingpage"></select></label>
+    <button class="reset-btn" id="reset-filters" type="button">Reset filters</button>
+  </div>
+</nav>
+
+<section>
+  <h2 class="sh">Marketing &mdash; is the ad + page machine working?</h2>
+  <p class="sh-note" id="marketing-week-note"></p>
+  <div class="kpi-grid" id="kpi-marketing"></div>
+
+  <h2 class="sh">Customer journey &mdash; are booked leads becoming clients?</h2>
+  <p class="sh-note" id="journey-week-note"></p>
+  <div class="kpi-grid five" id="kpi-journey"></div>
+  <div class="unattr" id="unattr-block"></div>
+</section>
+
+<section>
+  <h2 class="sh">Funnel &amp; cost per stage</h2>
+  <p class="sh-note" id="funnel-note"></p>
+  <div class="mock" id="funnel-block"></div>
+</section>
+
+<section>
+  <h2 class="sh">Trend</h2>
+  <p class="sh-note">Small multiples, not a dual-axis chart &mdash; daily bars under ~31 days, weekly beyond that</p>
+  <div class="trend-grid">
+    <div class="trend-card">
+      <h5>Ad Spend over time</h5>
+      <div id="trend-spend"></div>
+      <div class="trend-legend"><span><span class="sw" style="background:var(--cat-1)"></span><span id="trend-spend-legend"></span></span></div>
+    </div>
+    <div class="trend-card">
+      <h5>Appointments vs Settlements / cohort week</h5>
+      <div id="trend-funnel"></div>
+      <div class="trend-legend">
+        <span><span class="sw" style="background:var(--cat-1)"></span>Appointments</span>
+        <span><span class="sw" style="background:var(--cat-2)"></span>Settlements</span>
+        <span>&middot; dashed = still maturing</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2 class="sh">Campaign breakdown</h2>
+  <p class="sh-note">Click a column header to sort. Settlement counts only resolve once a cohort has matured.</p>
+  <div class="tablewrap">
+    <table class="data" id="campaign-table">
+      <thead>
+        <tr>
+          <th data-key="campaign">Campaign</th>
+          <th>Audience</th>
+          <th>Creative</th>
+          <th>Landing Page</th>
+          <th data-key="spend">Spend</th>
+          <th data-key="appts">Appts</th>
+          <th data-key="costPerAppt">Cost/Appt</th>
+          <th data-key="settled">Settlements</th>
+          <th data-key="costPerSettlement">Cost/Settlement</th>
+        </tr>
+      </thead>
+      <tbody id="campaign-table-body"></tbody>
+    </table>
+  </div>
+</section>
+
+<footer>
+  Ascendra Financial &middot; internal reporting prototype. Pulls live data from Meta, ClickFunnels, and the Sheet ledger via <code>/api/data</code> when configured; falls back to sample data otherwise (see the badge above).
+</footer>
+
+<script src="app.js?v=2026080606"></script>
+<script src="data.js?v=2026080606"></script>
+<script>
+  fetch('/api/auth/me').then(r => r.json()).then(d => {
+    const el = document.getElementById('whoami');
+    if (d.authenticated) {
+      el.innerHTML = `${d.email} &middot; <a href="/api/auth/logout" style="color:inherit">Sign out</a>`;
+    }
+  }).catch(() => {});
+</script>
+</body>
+</html>

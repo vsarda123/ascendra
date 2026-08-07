@@ -1,0 +1,9 @@
+{
+  "name": "ascendra-meta-ads-dashboard",
+  "private": true,
+  "dependencies": {
+    "@vercel/functions": "latest",
+    "googleapis": "latest",
+    "@supabase/supabase-js": "latest"
+  }
+}
