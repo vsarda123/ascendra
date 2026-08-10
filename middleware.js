@@ -52,7 +52,18 @@ async function verifySession(cookieValue, secret) {
   }
 }
 
+// TEMP: auth gate disabled at the user's explicit request while debugging
+// the dashboard not rendering, so both they and Claude can load pages
+// without signing in each time. The site is fully public while this is
+// true -- REMOVE THIS BLOCK (restoring the check below) once the app is
+// confirmed working.
+const AUTH_DISABLED_FOR_DEBUGGING = true;
+
 export default async function middleware(request) {
+  if (AUTH_DISABLED_FOR_DEBUGGING) {
+    return next();
+  }
+
   const secret = process.env.SESSION_SECRET;
   const session = await verifySession(getCookie(request, 'session'), secret);
 

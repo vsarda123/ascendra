@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Diagnostic Test Page</title>
+<style>
+  body { margin: 0; font-family: system-ui, sans-serif; background: #F5F3EE; color: #0B0E1F; }
+  .block { padding: 40px; margin: 20px; border-radius: 12px; font-size: 24px; font-weight: 700; }
+  .a { background: #00E88F; color: #003d24; }
+  .b { background: #7B00FF; color: #fff; }
+  .c { background: #d0393f; color: #fff; }
+  #js-result { }
+</style>
+</head>
+<body>
+
+<div class="block a">
+  STATIC TEST 1: If you can see this green box, plain HTML/CSS renders fine.
+</div>
+
+<div class="block b">
+  STATIC TEST 2: Hardcoded number, no JavaScript involved: $54,116
+</div>
+
+<div class="block c" id="js-result">
+  JS TEST: this box should turn dark green and say "JAVASCRIPT IS RUNNING" within 1 second. If it still says this exact sentence after a few seconds, JavaScript is not executing in this browser/page at all.
+</div>
+
+<script>
+  document.getElementById('js-result').textContent = 'JAVASCRIPT IS RUNNING -- current time: ' + new Date().toString();
+  document.getElementById('js-result').style.background = '#00E88F';
+  document.getElementById('js-result').style.color = '#003d24';
+</script>
+
+</body>
+</html>
