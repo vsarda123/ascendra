@@ -17,6 +17,14 @@ module.exports = {
     // Investors" funnel, served publicly at dianahemmad.com.au/debt-recycling.
     { campaign: 'Debt Recycling Lead magnet campaign', clickfunnelsPageId: 23710323, landingPage: '/debt-recycling' },
 
+    // dianahemmad.com.au/b-o-o-k-i-n-g serves a split test: pages 23502291
+    // ("Booking landing page") and 23607310 (its "Test B" copy) are
+    // byte-identical and both are strict subsets of the live page, so
+    // traffic divides between them and reading either alone halves the
+    // count. Both IDs are listed so the views sum. Which Meta campaign
+    // sends traffic here is still unconfirmed.
+    // { campaign: '...', clickfunnelsPageIds: [23502291, 23607310], landingPage: '/b-o-o-k-i-n-g' },
+
     // Landing step of "Leadmagnet - Strategic Lending Framework Property
     // Investment strategy" (page 23693120). Which Meta campaign drives it
     // is still unconfirmed -- "Trust Strategy Lead magnet campaign" and
