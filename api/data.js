@@ -75,6 +75,7 @@ async function readFromSupabase(since, until) {
     audience: l.audience,
     creative: l.creative,
     landingPage: l.landing_page,
+    sourceTab: l.source_tab || null,
     attended: l.attended,
     optionsSent: l.options_sent,
     approved: l.approved,

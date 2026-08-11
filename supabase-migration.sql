@@ -27,3 +27,8 @@ alter table daily_spend add column if not exists video_thruplay     bigint  not 
 alter table daily_spend add column if not exists quality_ranking          text;
 alter table daily_spend add column if not exists engagement_rate_ranking  text;
 alter table daily_spend add column if not exists conversion_rate_ranking  text;
+
+-- Which tab of the opt-in workbook a lead came from. That tab is the lead
+-- magnet, and currently the only evidence of which campaign produced the
+-- lead, so it is worth keeping even once a campaign has been mapped to it.
+alter table leads add column if not exists source_tab text;

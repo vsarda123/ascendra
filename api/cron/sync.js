@@ -136,6 +136,7 @@ module.exports = async (req, res) => {
         audience: l.audience,
         creative: l.creative,
         landing_page: l.landingPage,
+        source_tab: l.sourceTab || null,
         attended: l.attended,
         options_sent: l.optionsSent,
         approved: l.approved,
