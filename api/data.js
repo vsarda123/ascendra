@@ -1,4 +1,5 @@
 const { getSupabase } = require('../lib/supabase');
+const { CAMPAIGN_PAGE_MAP } = require('../data-sources.config');
 const {
   isoDate, addDays, withTimeout,
   fetchMetaInsights, fetchClickFunnelsWeekly, fetchSheetLeads,
@@ -165,8 +166,19 @@ module.exports = async (req, res) => {
     since, until, usedFallback, dailySpendCount: dailySpend.length, leadsCount: leads.length, sources, errors,
   }));
 
+  // Which integrations have credentials at all, as booleans only -- never
+  // the values. Distinguishes "connected but returning nothing" from "never
+  // set up", which the sources flags alone cannot: both show up as false.
+  const config = {
+    meta: Boolean(process.env.META_ACCESS_TOKEN && process.env.META_AD_ACCOUNT_ID),
+    clickfunnels: Boolean(process.env.CLICKFUNNELS_API_TOKEN && process.env.CLICKFUNNELS_SUBDOMAIN),
+    sheets: Boolean(process.env.GOOGLE_SHEETS_CLIENT_EMAIL && process.env.GOOGLE_SHEETS_PRIVATE_KEY && process.env.GOOGLE_SHEET_ID),
+    supabase: Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY),
+    campaignPageMappings: CAMPAIGN_PAGE_MAP.length,
+  };
+
   res.status(200).json({
-    sources, errors, since, until, dailySpend, leads,
+    sources, errors, config, since, until, dailySpend, leads,
     dataSource: usedFallback ? 'live-fallback' : 'supabase',
     generatedAt: new Date().toISOString(),
   });
