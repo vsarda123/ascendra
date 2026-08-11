@@ -141,6 +141,58 @@ async function checkSheet() {
   }
 }
 
+// The booking ledger is a different sheet from the opt-in workbook: it
+// records who actually booked a meeting, which is the qualified lead that
+// cost per lead should be measured against. Reports its shape, plus the
+// distinct utm_medium values that carry the campaign attribution.
+async function checkBookingsSheet() {
+  const sheetId = process.env.GOOGLE_BOOKINGS_SHEET_ID;
+  if (!sheetId) {
+    return { configured: false, note: 'Set GOOGLE_BOOKINGS_SHEET_ID and share the sheet with the service account.' };
+  }
+  const { email, key } = googleCredentials();
+  try {
+    const auth = new google.auth.JWT({
+      email, key,
+      scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
+    });
+    const sheets = google.sheets({ version: 'v4', auth });
+    const meta = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
+
+    const tabs = [];
+    for (const s of meta.data.sheets || []) {
+      const title = s.properties.title;
+      const resp = await sheets.spreadsheets.values.get({
+        spreadsheetId: sheetId,
+        range: `'${title.replace(/'/g, "''")}'!A1:Z`,
+      });
+      const rows = resp.data.values || [];
+      const headers = (rows[0] || []).map(h => String(h || '').trim());
+
+      // Distinct values for the attribution and attendance columns only.
+      // Everything else in this sheet is customer contact detail.
+      const distinct = {};
+      for (const want of ['utm_medium', 'utm_source', 'utm_campaign', 'attended']) {
+        const i = headers.findIndex(h => h.toLowerCase().replace(/\s+/g, '_') === want);
+        if (i === -1) continue;
+        const counts = {};
+        for (const r of rows.slice(1)) {
+          const v = (r[i] || '').toString().trim() || '(blank)';
+          counts[v] = (counts[v] || 0) + 1;
+        }
+        distinct[want] = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 15)
+          .map(([value, count]) => ({ value, count }));
+      }
+
+      tabs.push({ tab: title, headers, dataRows: Math.max(0, rows.length - 1), distinct });
+    }
+
+    return { configured: true, spreadsheetTitle: meta.data.properties && meta.data.properties.title, tabs };
+  } catch (e) {
+    return { configured: true, error: e.message, serviceAccount: email };
+  }
+}
+
 // Matches each campaign's ad destination URL against the funnel pages, so
 // CAMPAIGN_PAGE_MAP can be filled in from evidence rather than by guessing
 // which page a campaign name sounds like it points to.
@@ -190,15 +242,17 @@ function findByPath(clickfunnels, wanted) {
 }
 
 module.exports = async (req, res) => {
-  const [clickfunnels, sheet, destinations] = await Promise.all([
+  const [clickfunnels, sheet, bookings, destinations] = await Promise.all([
     checkClickFunnels(),
     checkSheet(),
+    checkBookingsSheet(),
     fetchMetaAdDestinations().catch(e => ({ error: e.message })),
   ]);
 
   res.status(200).json({
     clickfunnels,
     sheet,
+    bookings,
     adDestinations: destinations,
     pathLookup: req.query && req.query.path
       ? { path: req.query.path, matches: findByPath(clickfunnels, req.query.path) }

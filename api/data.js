@@ -122,7 +122,17 @@ async function readLive(since, until) {
 
   await Promise.allSettled(tasks);
   const dailySpend = mergeDailySpend(metaRows, cfByCampaign);
-  return { dailySpend, leads, sources, errors };
+  // The sheet readers carry names, emails and phone numbers so leads can be
+  // de-duplicated and matched; none of that is needed to draw a dashboard.
+  // The Supabase path never stores those fields, but this path returned them
+  // straight to the browser. Drop them here so the response cannot carry
+  // customer contact details regardless of which path served it.
+  return { dailySpend, leads: leads.map(stripPii), sources, errors };
+}
+
+function stripPii(lead) {
+  const { firstName, lastName, email, phone, ...safe } = lead;
+  return safe;
 }
 
 module.exports = async (req, res) => {
