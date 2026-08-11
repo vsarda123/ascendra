@@ -184,8 +184,12 @@ module.exports = async (req, res) => {
     })),
   ];
 
-  if (leadRows.length) {
-    const { error } = await supabase.from('leads').upsert(leadRows, { onConflict: 'id' });
+  // Last line of defence on the same conflict rule: whatever the sources
+  // produce, one id may appear only once per statement.
+  const uniqueLeadRows = [...new Map(leadRows.map(r => [r.id, r])).values()];
+
+  if (uniqueLeadRows.length) {
+    const { error } = await supabase.from('leads').upsert(uniqueLeadRows, { onConflict: 'id' });
     if (error) errors.supabaseWriteLeads = error.message;
   }
 
