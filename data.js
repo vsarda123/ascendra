@@ -39,9 +39,11 @@
   function buildMockData() {
     const rng = mulberry32(20260804);
     const rand = (min, max) => min + rng() * (max - min);
-    const SIM_TODAY = new Date('2026-08-04T00:00:00');
+    const SIM_TODAY = new Date('2026-08-04T00:00:00Z');
 
-    function addDays(date, n) { const d = new Date(date); d.setDate(d.getDate() + n); return d; }
+    // UTC throughout, matching app.js -- a local-time parse formatted back
+    // through toISOString() shifts the date by a day east of Greenwich.
+    function addDays(date, n) { const d = new Date(date); d.setUTCDate(d.getUTCDate() + n); return d; }
     function isoDate(d) { return d.toISOString().slice(0, 10); }
 
     const HISTORY_DAYS = 98;

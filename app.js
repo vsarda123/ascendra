@@ -78,18 +78,28 @@ function runDashboard(D) {
 
   const fmtMoney = (n) => n == null || !isFinite(n) ? DASH : '$' + Math.round(n).toLocaleString();
   const fmtPct = (n, d = 1) => n == null || !isFinite(n) ? DASH : n.toFixed(d) + '%';
-  const fmtDate = (iso) => new Date(iso + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+  // timeZone:'UTC' so the day shown is the day in the data, not that instant
+  // re-expressed in the viewer's zone (which would read a day early east of
+  // Greenwich, the same trap the date helpers below hit).
+  const fmtDate = (iso) => new Date(iso + 'T00:00:00Z').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
   const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
+  // Every one of these parses with an explicit 'Z' and uses the getUTC*/
+  // setUTC* accessors. Parsing as local time and then reading the result
+  // back through toISOString() (which is UTC) silently shifts the date by a
+  // day for anyone east of Greenwich: at UTC+10, local midnight is 14:00 UTC
+  // the day before, so addDaysStr(d, 1) returned d unchanged. bucketRange()
+  // advances its cursor with exactly that call, so its while loop never
+  // terminated and locked up the tab.
   function addDaysStr(dateStr, n) {
-    const d = new Date(dateStr + 'T00:00:00');
-    d.setDate(d.getDate() + n);
+    const d = new Date(dateStr + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + n);
     return d.toISOString().slice(0, 10);
   }
   function weekStartOf(dateStr) {
-    const d = new Date(dateStr + 'T00:00:00');
-    const day = d.getDay();
-    d.setDate(d.getDate() + (day === 0 ? -6 : 1) - day);
+    const d = new Date(dateStr + 'T00:00:00Z');
+    const day = d.getUTCDay();
+    d.setUTCDate(d.getUTCDate() + (day === 0 ? -6 : 1) - day);
     return d.toISOString().slice(0, 10);
   }
   function clampDate(dateStr) {
@@ -98,10 +108,10 @@ function runDashboard(D) {
     return dateStr;
   }
   function daysCount(from, to) {
-    return Math.round((new Date(to + 'T00:00:00') - new Date(from + 'T00:00:00')) / 86400000) + 1;
+    return Math.round((new Date(to + 'T00:00:00Z') - new Date(from + 'T00:00:00Z')) / 86400000) + 1;
   }
   function isMaturedDate(dateStr) {
-    const daysAgo = Math.round((new Date(TODAY + 'T00:00:00') - new Date(dateStr + 'T00:00:00')) / 86400000);
+    const daysAgo = Math.round((new Date(TODAY + 'T00:00:00Z') - new Date(dateStr + 'T00:00:00Z')) / 86400000);
     return daysAgo >= MATURITY_DAYS;
   }
 
@@ -121,13 +131,14 @@ function runDashboard(D) {
         return { from: clampDate(addDaysStr(thisWkStart, -7)), to: clampDate(addDaysStr(thisWkStart, -1)) };
       }
       case 'thismonth': {
-        const d = new Date(TODAY + 'T00:00:00');
-        return { from: clampDate(new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10)), to: TODAY };
+        const d = new Date(TODAY + 'T00:00:00Z');
+        const first = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
+        return { from: clampDate(first.toISOString().slice(0, 10)), to: TODAY };
       }
       case 'lastmonth': {
-        const d = new Date(TODAY + 'T00:00:00');
-        const lastMonthEnd = new Date(d.getFullYear(), d.getMonth(), 0);
-        const lastMonthStart = new Date(lastMonthEnd.getFullYear(), lastMonthEnd.getMonth(), 1);
+        const d = new Date(TODAY + 'T00:00:00Z');
+        const lastMonthEnd = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 0));
+        const lastMonthStart = new Date(Date.UTC(lastMonthEnd.getUTCFullYear(), lastMonthEnd.getUTCMonth(), 1));
         return { from: clampDate(lastMonthStart.toISOString().slice(0, 10)), to: clampDate(lastMonthEnd.toISOString().slice(0, 10)) };
       }
       case 'last90': return { from: clampDate(addDaysStr(TODAY, -89)), to: TODAY };
