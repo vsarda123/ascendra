@@ -33,6 +33,8 @@ async function checkClickFunnels() {
       // list is mostly theme scaffolding.
       funnelsStatus: raw.funnelsStatus,
       funnels: raw.funnels,
+      // Public slugs, which is what an ad's destination URL actually uses.
+      pageDetails: raw.pageDetails,
       rawIfUnrecognised: list.length ? undefined : raw,
     };
   } catch (e) {
