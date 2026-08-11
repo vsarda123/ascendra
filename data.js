@@ -154,51 +154,20 @@
     return { rows, usedPlaceholder };
   }
 
-  function synthesizePlaceholderLeads(dailySpend, todayStr) {
-    const rng = mulberry32(20260804);
-    const rand = (min, max) => min + rng() * (max - min);
-    const leads = [];
-    let seq = 1;
-    for (const row of dailySpend) {
-      const daysAgo = Math.round((new Date(todayStr + 'T00:00:00Z') - new Date(row.date + 'T00:00:00Z')) / 86400000);
-      const matured = daysAgo >= MATURITY_DAYS;
-      // Capped at 3/row regardless of click volume -- this only needs to
-      // look plausible, not model real conversion rates, and an uncapped
-      // formula against real (much higher than mock) click counts could
-      // generate a very large LEADS array that every render pass below then
-      // has to filter over repeatedly.
-      const bookings = Math.min(3, Math.round((row.clicks || 0) * 0.004 * rand(0.4, 1.6)));
-      for (let i = 0; i < bookings; i++) {
-        const attended = rng() < 0.76;
-        const optionsSent = attended && rng() < 0.72;
-        const approved = optionsSent && rng() < 0.67;
-        const settled = approved && matured && rng() < 0.72;
-        leads.push({
-          id: 'P' + (seq++),
-          generatedDate: row.date,
-          campaign: row.campaign,
-          audience: row.audience,
-          creative: row.creative,
-          landingPage: row.landingPage,
-          attended, optionsSent, approved, settled,
-        });
-      }
-    }
-    return leads;
-  }
-
   function toDashboardData(json) {
     const { rows: dailySpend, usedPlaceholder: landingPagePlaceholder } = backfillLandingPages(json.dailySpend);
     const dates = [...new Set(dailySpend.map(r => r.date))].sort();
     const today = dates[dates.length - 1];
     const earliest = dates[0];
 
-    let leadsRaw = json.leads || [];
-    let leadsPlaceholder = false;
-    if (leadsRaw.length === 0 && dailySpend.length > 0) {
-      leadsRaw = synthesizePlaceholderLeads(dailySpend, today);
-      leadsPlaceholder = true;
-    }
+    // No lead source connected means no leads -- full stop. This used to
+    // synthesize plausible-looking bookings, attendance, approvals and
+    // settlements from a seeded RNG whenever the ledger was empty. Every
+    // number below "Ad Clicks" was then invented, while the page presented
+    // them identically to the real Meta figures above. That is worse than
+    // an empty section on a dashboard meant for spend decisions.
+    const leadsRaw = json.leads || [];
+    const leadsMissing = leadsRaw.length === 0;
 
     const leads = leadsRaw.map(l => {
       const daysAgo = Math.round((new Date(today + 'T00:00:00Z') - new Date(l.generatedDate + 'T00:00:00Z')) / 86400000);
@@ -207,7 +176,7 @@
 
     return {
       DATES: dates, TODAY: today, EARLIEST: earliest, MATURITY_DAYS, DAILY_SPEND: dailySpend, LEADS: leads,
-      placeholders: { leads: leadsPlaceholder, landingPage: landingPagePlaceholder },
+      placeholders: { leadsMissing, landingPage: landingPagePlaceholder },
     };
   }
 
@@ -276,8 +245,8 @@
         `Sheet ${s.sheets ? CHECK : CROSS}`,
         `rows:${(D => D && D.DAILY_SPEND ? D.DAILY_SPEND.length : 0)(data)}`,
       ];
-      if (p.leads) parts.push('leads:PLACEHOLDER (connect Sheet to replace)');
-      if (p.landingPage) parts.push('landing page:PLACEHOLDER (map CAMPAIGN_PAGE_MAP to replace)');
+      if (p.leadsMissing) parts.push('no lead source connected');
+      if (p.landingPage) parts.push('landing page unmapped');
       el.textContent = `Live data ${MIDDOT} ${parts.join(' ' + MIDDOT + ' ')}`;
       el.className = 'source-badge live';
     } else {

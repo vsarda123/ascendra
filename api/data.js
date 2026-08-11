@@ -51,6 +51,21 @@ async function readFromSupabase(since, until) {
     spend: Number(r.spend) || 0,
     clicks: r.clicks || 0,
     landingPageViews: r.landing_page_views || 0,
+    // Default to 0 rather than assuming the column exists: rows written
+    // before supabase-migration.sql was applied have no value for these.
+    impressions: r.impressions || 0,
+    reach: r.reach || 0,
+    inlineLinkClicks: r.inline_link_clicks || 0,
+    outboundClicks: r.outbound_clicks || 0,
+    videoPlays: r.video_plays || 0,
+    videoP25: r.video_p25 || 0,
+    videoP50: r.video_p50 || 0,
+    videoP75: r.video_p75 || 0,
+    videoP95: r.video_p95 || 0,
+    videoThruplay: r.video_thruplay || 0,
+    qualityRanking: r.quality_ranking || null,
+    engagementRateRanking: r.engagement_rate_ranking || null,
+    conversionRateRanking: r.conversion_rate_ranking || null,
   }));
   const leads = (leadsData || []).map(l => ({
     id: l.id,

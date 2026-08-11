@@ -85,7 +85,7 @@ window.bootLog('inline boot script ran');
 <section>
   <h2 class="sh">Marketing &mdash; is the ad + page machine working?</h2>
   <p class="sh-note" id="marketing-week-note"></p>
-  <div class="kpi-grid" id="kpi-marketing"></div>
+  <div class="kpi-grid six" id="kpi-marketing"></div>
 
   <h2 class="sh">Customer journey &mdash; are booked leads becoming clients?</h2>
   <p class="sh-note" id="journey-week-note"></p>
@@ -109,13 +109,9 @@ window.bootLog('inline boot script ran');
       <div class="trend-legend"><span><span class="sw" style="background:var(--cat-1)"></span><span id="trend-spend-legend"></span></span></div>
     </div>
     <div class="trend-card">
-      <h5>Appointments vs Settlements / cohort week</h5>
+      <h5>Cost per link click over time</h5>
       <div id="trend-funnel"></div>
-      <div class="trend-legend">
-        <span><span class="sw" style="background:var(--cat-1)"></span>Appointments</span>
-        <span><span class="sw" style="background:var(--cat-2)"></span>Settlements</span>
-        <span>&middot; dashed = still maturing</span>
-      </div>
+      <div class="trend-legend"><span><span class="sw" style="background:var(--cat-2)"></span><span id="trend-cpc-legend"></span></span></div>
     </div>
   </div>
 </section>
@@ -130,11 +126,12 @@ window.bootLog('inline boot script ran');
           <th data-key="campaign">Campaign</th>
           <th>Audience</th>
           <th>Creative</th>
-          <th>Landing Page</th>
           <th data-key="spend">Spend</th>
+          <th data-key="impressions">Impressions</th>
+          <th data-key="linkClicks">Link Clicks</th>
+          <th data-key="ctr">CTR</th>
+          <th data-key="cpc">Cost/Click</th>
           <th data-key="appts">Appts</th>
-          <th data-key="costPerAppt">Cost/Appt</th>
-          <th data-key="settled">Settlements</th>
           <th data-key="costPerSettlement">Cost/Settlement</th>
         </tr>
       </thead>
@@ -147,9 +144,9 @@ window.bootLog('inline boot script ran');
   Ascendra Financial &middot; internal reporting prototype. Pulls live data from Meta, ClickFunnels, and the Sheet ledger via <code>/api/data</code> when configured; falls back to sample data otherwise (see the badge above).
 </footer>
 
-<script src="app.js?v=2026081104"></script>
+<script src="app.js?v=2026081105"></script>
 <script>window.bootLog('app.js tag done, renderDashboard=' + typeof window.renderDashboard);</script>
-<script src="data.js?v=2026081104"></script>
+<script src="data.js?v=2026081105"></script>
 <script>window.bootLog('data.js tag done (its own async work may still be running)');</script>
 <script>
   fetch('/api/auth/me').then(r => r.json()).then(d => {

@@ -74,14 +74,22 @@ module.exports = async (req, res) => {
   // touch the same conflict key twice in one statement ("ON CONFLICT DO
   // UPDATE command cannot affect row a second time"), so collapse duplicates
   // by summing spend/clicks/views before writing.
+  const SUMMED_METRICS = [
+    'spend', 'clicks', 'landingPageViews', 'impressions', 'reach',
+    'inlineLinkClicks', 'outboundClicks', 'videoPlays',
+    'videoP25', 'videoP50', 'videoP75', 'videoP95', 'videoThruplay',
+  ];
   const dedupedByKey = new Map();
   for (const r of dailySpend) {
     const key = `${r.date}|${r.campaign}|${r.audience}|${r.creative}`;
     const existing = dedupedByKey.get(key);
     if (existing) {
-      existing.spend += r.spend;
-      existing.clicks += r.clicks;
-      existing.landingPageViews += r.landingPageViews;
+      // Summing reach across merged ads overstates it -- reach is unique
+      // people, so two ads that reached the same person count them twice.
+      // Meta only reports it per ad and gives no way to de-duplicate across
+      // them, so this is an upper bound. Impressions and clicks are true
+      // counts and sum exactly.
+      for (const k of SUMMED_METRICS) existing[k] += r[k] || 0;
     } else {
       dedupedByKey.set(key, { ...r });
     }
@@ -99,6 +107,19 @@ module.exports = async (req, res) => {
         spend: r.spend,
         clicks: r.clicks,
         landing_page_views: r.landingPageViews,
+        impressions: r.impressions || 0,
+        reach: r.reach || 0,
+        inline_link_clicks: r.inlineLinkClicks || 0,
+        outbound_clicks: r.outboundClicks || 0,
+        video_plays: r.videoPlays || 0,
+        video_p25: r.videoP25 || 0,
+        video_p50: r.videoP50 || 0,
+        video_p75: r.videoP75 || 0,
+        video_p95: r.videoP95 || 0,
+        video_thruplay: r.videoThruplay || 0,
+        quality_ranking: r.qualityRanking || null,
+        engagement_rate_ranking: r.engagementRateRanking || null,
+        conversion_rate_ranking: r.conversionRateRanking || null,
         updated_at: new Date().toISOString(),
       })),
       { onConflict: 'date,campaign,audience,creative' }

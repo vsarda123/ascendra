@@ -64,7 +64,9 @@ function runDashboard(D) {
   }
 
   const state = { preset: 'last90', from: null, to: null, campaign: 'all', audience: 'all', creative: 'all', landingPage: 'all' };
-  const sortState = { key: 'costPerSettlement', dir: 1 };
+  // Highest spend first: with no settlement data to rank on, the money going
+  // out is the thing worth looking at from the top of the table down.
+  const sortState = { key: 'spend', dir: -1 };
 
   // ---------------------------------------------------------------- helpers
   // Built from character codes, not typed literally, so this file is plain
@@ -274,41 +276,59 @@ function runDashboard(D) {
     const prevAvailable = prevFrom >= EARLIEST;
 
     const curSpendRows = spendFor(from, to);
-    const curLeads = leadsFor(from, to);
-    const adSpend = curSpendRows.reduce((s, r) => s + r.spend, 0);
-    const lpViews = curSpendRows.reduce((s, r) => s + r.landingPageViews, 0);
-    const appts = curLeads.length;
-    const convRate = lpViews ? (appts / lpViews) * 100 : null;
-    const costPerAppt = appts ? adSpend / appts : null;
+    const sum = (rows, key) => rows.reduce((s, r) => s + (r[key] || 0), 0);
 
-    let prevSpend = null, prevAppts = null;
-    if (prevAvailable) {
-      prevSpend = spendFor(prevFrom, prevTo).reduce((s, r) => s + r.spend, 0);
-      prevAppts = leadsFor(prevFrom, prevTo).length;
-    }
+    const adSpend = sum(curSpendRows, 'spend');
+    const impressions = sum(curSpendRows, 'impressions');
+    const reach = sum(curSpendRows, 'reach');
+    // Link clicks, not the raw `clicks` total -- `clicks` counts every click
+    // anywhere on the ad, including likes, comments and profile taps, so it
+    // overstates how many people actually set off toward the site.
+    const linkClicks = sum(curSpendRows, 'inlineLinkClicks');
+    const outbound = sum(curSpendRows, 'outboundClicks');
+    const videoPlays = sum(curSpendRows, 'videoPlays');
 
-    const apptsDeltaPct = prevAppts ? ((appts - prevAppts) / prevAppts) * 100 : null;
+    const ctr = impressions ? (linkClicks / impressions) * 100 : null;
+    const cpc = linkClicks ? adSpend / linkClicks : null;
+    const cpm = impressions ? (adSpend / impressions) * 1000 : null;
+    const frequency = reach ? impressions / reach : null;
+    const hookRate = impressions ? (videoPlays / impressions) * 100 : null;
+    // How many of the people who clicked in Meta actually left for the site.
+    const clickThrough = linkClicks ? (outbound / linkClicks) * 100 : null;
+
+    const prevSpend = prevAvailable ? sum(spendFor(prevFrom, prevTo), 'spend') : null;
+    const spendDeltaPct = prevSpend ? ((adSpend - prevSpend) / prevSpend) * 100 : null;
 
     document.getElementById('kpi-marketing').innerHTML = `
       <div class="kpi">
         <div class="l">Ad Spend</div>
         <div class="v">${fmtMoney(adSpend)}</div>
-        <div class="d">${prevSpend != null ? `vs ${fmtMoney(prevSpend)} previous period` : 'no earlier period available'}</div>
+        <div class="d ${spendDeltaPct > 0 ? 'bad' : spendDeltaPct < 0 ? 'good' : ''}">${prevSpend != null ? (spendDeltaPct >= 0 ? UP_TRI + ' ' : DOWN_TRI + ' ') + Math.abs(spendDeltaPct).toFixed(0) + `% vs ${fmtMoney(prevSpend)} prior` : 'no earlier period available'}</div>
       </div>
       <div class="kpi">
-        <div class="l">Landing Page Conv. Rate</div>
-        <div class="v">${convRate != null ? convRate.toFixed(1) : DASH}<small>%</small></div>
-        <div class="d">${appts} of ${lpViews.toLocaleString()} visits</div>
+        <div class="l">Impressions</div>
+        <div class="v">${impressions.toLocaleString()}</div>
+        <div class="d">${reach ? `${reach.toLocaleString()} reached ${MIDDOT} ${frequency.toFixed(1)}x frequency` : 'reach not reported'}</div>
       </div>
       <div class="kpi">
-        <div class="l">Appointments Booked</div>
-        <div class="v">${appts}</div>
-        <div class="d ${apptsDeltaPct > 0 ? 'good' : apptsDeltaPct < 0 ? 'bad' : ''}">${apptsDeltaPct != null ? (apptsDeltaPct >= 0 ? UP_TRI + ' ' : DOWN_TRI + ' ') + Math.abs(apptsDeltaPct).toFixed(0) + '% vs previous period' : DASH}</div>
+        <div class="l">Link CTR</div>
+        <div class="v">${ctr != null ? ctr.toFixed(2) : DASH}<small>%</small></div>
+        <div class="d">${linkClicks.toLocaleString()} link clicks</div>
       </div>
       <div class="kpi">
-        <div class="l">Cost per Appointment</div>
-        <div class="v">${fmtMoney(costPerAppt)}</div>
-        <div class="d">target &lt; $150</div>
+        <div class="l">Cost per Link Click</div>
+        <div class="v">${cpc != null ? '$' + cpc.toFixed(2) : DASH}</div>
+        <div class="d">${cpm != null ? '$' + cpm.toFixed(2) + ' CPM' : DASH}</div>
+      </div>
+      <div class="kpi">
+        <div class="l">Hook Rate</div>
+        <div class="v">${hookRate != null && videoPlays ? hookRate.toFixed(1) : DASH}<small>%</small></div>
+        <div class="d">${videoPlays ? videoPlays.toLocaleString() + ' 3-sec plays' : 'no video ads in range'}</div>
+      </div>
+      <div class="kpi">
+        <div class="l">Click ${DASH_EN} Site Follow-through</div>
+        <div class="v">${clickThrough != null && outbound ? clickThrough.toFixed(0) : DASH}<small>%</small></div>
+        <div class="d">${outbound ? outbound.toLocaleString() + ' left Meta for the site' : 'outbound clicks not reported'}</div>
       </div>
     `;
     document.getElementById('marketing-week-note').textContent =
@@ -324,6 +344,15 @@ function runDashboard(D) {
   }
 
   function renderKpisJourney() {
+    if (LEADS.length === 0) {
+      document.getElementById('kpi-journey').innerHTML = `
+        <div class="kpi" style="grid-column:1/-1"><div class="l">Customer journey</div>
+        <div class="v" style="font-size:15px;color:var(--ink-3);line-height:1.5">No lead source is connected, so nothing past the ad click can be measured yet.<br>
+        Booked appointments, attendance, approvals and settlements need the Calendly/ClickFunnels opt-in ledger (Google Sheet) and the MyCRM outcome data.</div></div>`;
+      document.getElementById('journey-week-note').textContent = `Ad-side metrics above are live from Meta ${DASH} this block stays empty until the lead data is wired up`;
+      return;
+    }
+
     const cohortWeek = mostRecentMaturedCohortWeek(state.from, state.to);
 
     if (!cohortWeek) {
@@ -354,49 +383,81 @@ function runDashboard(D) {
   }
 
   function renderUnattributed() {
+    const block = document.getElementById('unattr-block');
     const allLeads = LEADS.filter(l => l.generatedDate >= state.from && l.generatedDate <= state.to);
+    // With no leads at all there is no attribution gap to report -- showing
+    // "0 of 0 bookings" would read as a clean result rather than no data.
+    if (allLeads.length === 0) { block.style.display = 'none'; return; }
+    block.style.display = '';
     const unattr = allLeads.filter(l => l.campaign === null).length;
-    const pct = allLeads.length ? (unattr / allLeads.length) * 100 : 0;
-    document.getElementById('unattr-block').innerHTML =
+    const pct = (unattr / allLeads.length) * 100;
+    block.innerHTML =
       `<b>${fmtPct(pct)} unattributed</b> ${DASH} ${unattr} of ${allLeads.length} bookings in range arrived without a usable campaign source (broken UTM/match-key chain). Real cost, invisible in the table below.`;
   }
 
   // ---------------------------------------------------------------- funnel
+  // The whole selected range, not one matured cohort week. The ad-side
+  // stages are same-day facts that need no maturation, and restricting the
+  // entire funnel to a single week threw away most of the range and showed
+  // nothing at all whenever no week had matured yet.
   function renderFunnel() {
-    const cohortWeek = mostRecentMaturedCohortWeek(state.from, state.to);
+    const { from, to } = state;
+    const spendRows = spendFor(from, to);
+    const sum = (key) => spendRows.reduce((s, r) => s + (r[key] || 0), 0);
 
-    if (!cohortWeek) {
-      document.getElementById('funnel-block').innerHTML = `<p style="color:var(--ink-3);font-size:13px">No fully matured cohort in the selected range.</p>`;
-      return;
-    }
+    const spend = sum('spend');
+    const impressions = sum('impressions');
+    const videoPlays = sum('videoPlays');
+    const linkClicks = sum('inlineLinkClicks');
+    const outbound = sum('outboundClicks');
+    const lpViews = sum('landingPageViews');
 
-    const spendRows = DAILY_SPEND.filter(r => weekStartOf(r.date) === cohortWeek && rowMatchesFilters(r));
-    const clicks = spendRows.reduce((s, r) => s + r.clicks, 0);
-    const lpViews = spendRows.reduce((s, r) => s + r.landingPageViews, 0);
-    const spend = spendRows.reduce((s, r) => s + r.spend, 0);
-    const cohortLeads = LEADS.filter(l => weekStartOf(l.generatedDate) === cohortWeek && (l.campaign === null ? filtersAllOpen() : rowMatchesFilters(l)));
-    const booked = cohortLeads.length;
-    const attended = cohortLeads.filter(l => l.attended).length;
-    const optionsSent = cohortLeads.filter(l => l.optionsSent).length;
-    const approved = cohortLeads.filter(l => l.approved).length;
-    const settled = cohortLeads.filter(l => l.settled).length;
+    const rangeLeads = leadsFor(from, to);
+    const booked = rangeLeads.length;
+    const attended = rangeLeads.filter(l => l.attended).length;
+    const optionsSent = rangeLeads.filter(l => l.optionsSent).length;
+    const approved = rangeLeads.filter(l => l.approved).length;
+    const settled = rangeLeads.filter(l => l.settled).length;
 
+    const costPer = (n) => n ? '$' + (spend / n).toFixed(n < 100 ? 0 : 2) + ' each' : null;
+    const leadsConnected = LEADS.length > 0;
+    const pagesConnected = lpViews > 0;
+
+    // `source` is what makes an empty stage readable: a real zero from a
+    // connected source means the step is genuinely losing everyone, while an
+    // unconnected source means we simply cannot see that step yet. Those
+    // demand opposite responses, so the funnel must not render them alike.
     const stages = [
-      { name: 'Ad Clicks', value: clicks, pctOf: null, meta: `${clicks ? '$' + (spend / clicks).toFixed(2) : DASH} / click` },
-      { name: 'Landing Page Views', value: lpViews, pctOf: clicks, meta: null },
-      { name: 'Appointments Booked', value: booked, pctOf: lpViews, meta: booked ? `$${(spend / booked).toFixed(0)}/appt` : null },
-      { name: 'Appointment Attended', value: attended, pctOf: booked, meta: null },
-      { name: 'Options Sent', value: optionsSent, pctOf: attended, meta: null },
-      { name: 'Approved', value: approved, pctOf: optionsSent, meta: null },
-      { name: 'Settled', value: settled, pctOf: approved, meta: settled ? `$${(spend / settled).toFixed(0)}/settlement` : null },
+      { name: 'Impressions', value: impressions, pctOf: null, meta: costPer(impressions / 1000) ? '$' + ((spend / impressions) * 1000).toFixed(2) + ' CPM' : null, source: true },
+      { name: '3-Sec Video Plays', value: videoPlays, pctOf: impressions, meta: videoPlays ? 'hook rate' : 'no video ads in range', source: videoPlays > 0 },
+      { name: 'Link Clicks', value: linkClicks, pctOf: impressions, meta: costPer(linkClicks), source: true },
+      { name: 'Left Meta for Site', value: outbound, pctOf: linkClicks, meta: costPer(outbound), source: outbound > 0 },
+      { name: 'Landing Page Views', value: lpViews, pctOf: outbound || linkClicks, meta: pagesConnected ? costPer(lpViews) : 'ClickFunnels not mapped', source: pagesConnected },
+      { name: 'Appointments Booked', value: booked, pctOf: lpViews || outbound || linkClicks, meta: leadsConnected ? costPer(booked) : 'no lead source connected', source: leadsConnected },
+      { name: 'Appointment Attended', value: attended, pctOf: booked, meta: leadsConnected ? null : 'needs CRM', source: leadsConnected },
+      { name: 'Options Sent', value: optionsSent, pctOf: attended, meta: leadsConnected ? null : 'needs CRM', source: leadsConnected },
+      { name: 'Approved', value: approved, pctOf: optionsSent, meta: leadsConnected ? null : 'needs CRM', source: leadsConnected },
+      { name: 'Settled', value: settled, pctOf: approved, meta: leadsConnected ? costPer(settled) : 'needs CRM', source: leadsConnected },
     ];
-    const max = clicks || 1;
-    const colors = ['#c9a8ff', '#b183ff', '#9a5eff', '#7B00FF', '#5f00cc', '#4a009e', '#350070'];
 
-    document.getElementById('funnel-note').textContent = `Cohort: leads generated week of ${fmtDate(cohortWeek)} ${DASH} fully matured`;
+    const max = impressions || 1;
+    const colors = ['#d9c2ff', '#c9a8ff', '#b183ff', '#9a5eff', '#7B00FF', '#6a00e0', '#5f00cc', '#4a009e', '#3d0082', '#350070'];
+
+    document.getElementById('funnel-note').textContent =
+      `${fmtDate(from)} ${DASH_EN} ${fmtDate(to)} ${MIDDOT} each bar shows what share of the step above it survived`;
+
     document.getElementById('funnel-block').innerHTML = `<div class="funnel">${stages.map((s, i) => {
+      if (!s.source) {
+        return `<div class="fstage">
+          <span class="fname">${s.name}</span>
+          <span class="fbarwrap"><span class="fbar unavailable">not connected</span></span>
+          <span class="fmeta">${s.meta || ''}</span>
+        </div>`;
+      }
       const widthPct = Math.max(4, (s.value / max) * 100);
-      const pctLabel = s.pctOf ? `<b>${((s.value / s.pctOf) * 100).toFixed(0)}%</b> of prior &middot; ` : '';
+      const dropPct = s.pctOf ? (s.value / s.pctOf) * 100 : null;
+      const dropClass = dropPct == null ? '' : dropPct < 25 ? ' bad' : dropPct < 60 ? ' warn' : ' ok';
+      const pctLabel = dropPct != null ? `<b class="drop${dropClass}">${dropPct.toFixed(dropPct < 10 ? 1 : 0)}%</b> of prior ${MIDDOT} ` : '';
       return `<div class="fstage">
         <span class="fname">${s.name}</span>
         <span class="fbarwrap"><span class="fbar" style="width:${widthPct}%;background:${colors[i]}">${s.value.toLocaleString()}</span></span>
@@ -475,13 +536,22 @@ function runDashboard(D) {
     document.getElementById('trend-spend-legend').textContent =
       `Spend ($${Math.min(...spendByBucket).toLocaleString()}${DASH_EN}$${Math.max(...spendByBucket).toLocaleString()} per ${buckets.length > 31 ? 'week' : 'day'})`;
 
-    const apptsByBucket = buckets.map(b => leadsFor(b.start, b.end).length);
-    const settledByBucket = buckets.map(b => leadsFor(b.start, b.end).filter(l => l.settled).length);
-    const firstImmatureIdx = buckets.findIndex(b => !isMaturedDate(b.end));
-    document.getElementById('trend-funnel').innerHTML = svgLines([
-      { values: apptsByBucket, color: 'var(--cat-1)', dashedFrom: firstImmatureIdx > 0 ? firstImmatureIdx - 1 : (firstImmatureIdx === 0 ? 0 : null) },
-      { values: settledByBucket, color: 'var(--cat-2)', dashedFrom: firstImmatureIdx > 0 ? firstImmatureIdx - 1 : (firstImmatureIdx === 0 ? 0 : null) },
-    ], {});
+    // Cost per link click, bucket by bucket. Spend alone says how much went
+    // out; this says whether each dollar is buying more or fewer people, and
+    // it is the earliest warning that a creative is fatiguing.
+    const cpcByBucket = buckets.map(b => {
+      const rows = spendFor(b.start, b.end);
+      const s = rows.reduce((acc, r) => acc + r.spend, 0);
+      const c = rows.reduce((acc, r) => acc + (r.inlineLinkClicks || 0), 0);
+      return c ? s / c : 0;
+    });
+    document.getElementById('trend-funnel').innerHTML = svgLines(
+      [{ values: cpcByBucket, color: 'var(--cat-2)', dashedFrom: null }], {}
+    );
+    const priced = cpcByBucket.filter(v => v > 0);
+    document.getElementById('trend-cpc-legend').textContent = priced.length
+      ? `$${Math.min(...priced).toFixed(2)}${DASH_EN}$${Math.max(...priced).toFixed(2)} per link click`
+      : 'no link clicks in range';
   }
 
   // ----------------------------------------------------------------- table
@@ -497,22 +567,35 @@ function runDashboard(D) {
 
     const rows = campaignNames.map(name => {
       const spendRows = rangeSpend.filter(r => r.campaign === name);
-      const spend = spendRows.reduce((s, r) => s + r.spend, 0);
+      const sum = (key) => spendRows.reduce((s, r) => s + (r[key] || 0), 0);
+      const spend = sum('spend');
+      const impressions = sum('impressions');
+      const linkClicks = sum('inlineLinkClicks');
+      const ctr = impressions ? (linkClicks / impressions) * 100 : null;
+      const cpc = linkClicks ? spend / linkClicks : null;
+
       const leads = rangeLeads.filter(l => l.campaign === name);
       const appts = leads.length;
       const anyMatured = leads.some(l => l.matured);
       const settled = leads.filter(l => l.settled).length;
-      const costPerAppt = appts ? spend / appts : null;
       const costPerSettlement = settled ? spend / settled : null;
-      let status = 'warning';
-      if (!anyMatured) status = null;
-      else if (costPerSettlement == null) status = 'critical';
-      else if (costPerSettlement < 700) status = 'good';
-      else if (costPerSettlement < 1500) status = 'warning';
-      else status = 'critical';
+
+      // Ranked on cost per link click while settlement data is unavailable.
+      // Grading every campaign 'critical' for having no settlements, when no
+      // system is reporting settlements at all, would flag the whole account
+      // red and say nothing about which campaigns are actually working.
+      let status;
+      if (anyMatured && costPerSettlement != null) {
+        status = costPerSettlement < 700 ? 'good' : costPerSettlement < 1500 ? 'warning' : 'critical';
+      } else if (cpc == null) {
+        status = null;
+      } else {
+        status = cpc < 2 ? 'good' : cpc < 5 ? 'warning' : 'critical';
+      }
+
       return {
         name, audience: spendRows[0].audience, creative: spendRows[0].creative, landingPage: spendRows[0].landingPage,
-        spend, appts, costPerAppt, settled, costPerSettlement, status, anyMatured,
+        spend, impressions, linkClicks, ctr, cpc, appts, settled, costPerSettlement, status, anyMatured,
       };
     });
 
@@ -527,19 +610,21 @@ function runDashboard(D) {
       return (av - bv) * dir;
     });
 
+    const noLeadSource = LEADS.length === 0;
     document.getElementById('campaign-table-body').innerHTML = rows.map(r => `
       <tr>
         <td>${r.status ? `<span class="status-dot ${r.status}"></span>` : ''}${escapeHtml(r.name)}</td>
         <td class="dim">${escapeHtml(r.audience)}</td>
         <td class="dim">${escapeHtml(r.creative)}</td>
-        <td class="dim">${escapeHtml(r.landingPage)}</td>
         <td>${fmtMoney(r.spend)}</td>
-        <td>${r.appts}</td>
-        <td>${fmtMoney(r.costPerAppt)}</td>
-        <td>${r.anyMatured ? r.settled : '<span class="pending">maturing</span>'}</td>
-        <td>${r.anyMatured ? fmtMoney(r.costPerSettlement) : `<span class="pending">${DASH}</span>`}</td>
+        <td>${r.impressions.toLocaleString()}</td>
+        <td>${r.linkClicks.toLocaleString()}</td>
+        <td>${r.ctr != null ? r.ctr.toFixed(2) + '%' : DASH}</td>
+        <td>${r.cpc != null ? '$' + r.cpc.toFixed(2) : DASH}</td>
+        <td>${noLeadSource ? `<span class="pending">${DASH}</span>` : r.appts}</td>
+        <td>${noLeadSource ? `<span class="pending">${DASH}</span>` : (r.anyMatured ? fmtMoney(r.costPerSettlement) : `<span class="pending">maturing</span>`)}</td>
       </tr>
-    `).join('') || `<tr><td colspan="9" style="color:var(--ink-3);font-style:italic">No campaigns match the current filters.</td></tr>`;
+    `).join('') || `<tr><td colspan="10" style="color:var(--ink-3);font-style:italic">No campaigns match the current filters.</td></tr>`;
 
     document.querySelectorAll('#campaign-table th[data-key]').forEach(th => {
       th.classList.toggle('sorted', th.dataset.key === sortState.key);
