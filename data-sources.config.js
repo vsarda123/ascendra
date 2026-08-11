@@ -19,19 +19,16 @@ module.exports = {
 
     // dianahemmad.com.au/b-o-o-k-i-n-g serves a split test: pages 23502291
     // ("Booking landing page") and 23607310 (its "Test B" copy) are
-    // byte-identical and both are strict subsets of the live page, so
-    // traffic divides between them and reading either alone halves the
-    // count. Both IDs are listed so the views sum. Which Meta campaign
-    // sends traffic here is still unconfirmed.
-    // { campaign: '...', clickfunnelsPageIds: [23502291, 23607310], landingPage: '/b-o-o-k-i-n-g' },
+    // identical and both are strict subsets of the live page, so traffic
+    // divides between them and reading either alone halves the count. Both
+    // campaigns below point here; the page's views are counted once and
+    // apportioned between them by clicks.
+    { campaign: 'Instagram Redirect Campaign', clickfunnelsPageIds: [23502291, 23607310], landingPage: '/b-o-o-k-i-n-g' },
+    { campaign: 'PROS | Property Strategy | Website Leads | A', clickfunnelsPageIds: [23502291, 23607310], landingPage: '/b-o-o-k-i-n-g' },
 
-    // Landing step of "Leadmagnet - Strategic Lending Framework Property
-    // Investment strategy" (page 23693120). Which Meta campaign drives it
-    // is still unconfirmed -- "Trust Strategy Lead magnet campaign" and
-    // "Campaign SMSF" are both plausible from their names alone, and
-    // crediting page views to the wrong campaign is worse than leaving the
-    // row blank. Fill in once the ad's destination is known.
-    // { campaign: '...', clickfunnelsPageId: 23693120, landingPage: '/strategic-lending-framework' },
+    // Page 23693120 (Strategic Lending Framework) is deliberately unmapped:
+    // no campaign currently drives it, and its 66 opt-ins arrived from
+    // something other than paid Meta traffic.
   ],
 
   // Opt-in workbook tab -> the Meta campaign that paid for those opt-ins.

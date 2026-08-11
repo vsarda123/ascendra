@@ -176,6 +176,12 @@ module.exports = async (req, res) => {
     sheets: Boolean(process.env.GOOGLE_SHEETS_CLIENT_EMAIL && process.env.GOOGLE_SHEETS_PRIVATE_KEY && process.env.GOOGLE_SHEET_ID),
     supabase: Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY),
     campaignPageMappings: CAMPAIGN_PAGE_MAP.length,
+    // A mapping is matched on the exact campaign name Meta reports, so a
+    // renamed or mistyped campaign silently maps nothing and its landing
+    // page column stays empty with no error anywhere. Name the misses.
+    unmatchedCampaignMappings: CAMPAIGN_PAGE_MAP
+      .map(m => m.campaign)
+      .filter(name => !dailySpend.some(r => r.campaign === name)),
   };
 
   res.status(200).json({
