@@ -177,6 +177,18 @@ function proposeMapping(clickfunnels, destinations) {
   });
 }
 
+// Answers "which page is this ad pointing at" directly: pass
+// ?path=/b-o-o-k-i-n-g and get the page whose published slug matches.
+function findByPath(clickfunnels, wanted) {
+  if (!wanted || !clickfunnels || !clickfunnels.pageDetails) return null;
+  const norm = (p) => '/' + String(p || '').trim().replace(/^\/+|\/+$/g, '').toLowerCase();
+  const target = norm(wanted);
+
+  return Object.entries(clickfunnels.pageDetails)
+    .filter(([, d]) => d.currentPath && norm(d.currentPath) === target)
+    .map(([pageId, d]) => ({ pageId: Number(pageId), name: d.name, currentPath: d.currentPath }));
+}
+
 module.exports = async (req, res) => {
   const [clickfunnels, sheet, destinations] = await Promise.all([
     checkClickFunnels(),
@@ -188,6 +200,9 @@ module.exports = async (req, res) => {
     clickfunnels,
     sheet,
     adDestinations: destinations,
+    pathLookup: req.query && req.query.path
+      ? { path: req.query.path, matches: findByPath(clickfunnels, req.query.path) }
+      : null,
     proposedCampaignPageMap: proposeMapping(clickfunnels, destinations),
     campaignPageMap: { mappings: CAMPAIGN_PAGE_MAP.length, entries: CAMPAIGN_PAGE_MAP },
     checkedAt: new Date().toISOString(),
