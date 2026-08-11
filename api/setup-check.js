@@ -49,8 +49,15 @@ async function checkSheet() {
   const { email, key } = googleCredentials();
   // Shape of the key without revealing it, so a credential that was pasted
   // in the wrong form can be identified from the response alone.
+  const rawTrimmed = GOOGLE_SHEETS_PRIVATE_KEY.trim();
   const keyShape = {
-    rawLooksLikeJson: GOOGLE_SHEETS_PRIVATE_KEY.trim().startsWith('{'),
+    rawLooksLikeJson: rawTrimmed.startsWith('{'),
+    rawLength: rawTrimmed.length,
+    // A PKCS8 body base64-encodes to something starting "MII"; seeing that
+    // with no header means only the wrapper is missing, not the key.
+    rawStartsWithMII: rawTrimmed.startsWith('MII'),
+    rawFirstChars: rawTrimmed.slice(0, 5),
+    rawHasBeginAnywhere: rawTrimmed.includes('-----BEGIN'),
     resolvedLength: key.length,
     startsWithHeader: key.startsWith('-----BEGIN'),
     endsWithFooter: key.trimEnd().endsWith('-----'),
