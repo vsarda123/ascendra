@@ -1,9 +1,10 @@
 {
   "name": "ascendra-meta-ads-dashboard",
   "private": true,
+  "comment": "Versions are pinned deliberately. These were on 'latest', and a googleapis major that dropped the JWT client's positional arguments silently broke the Google Sheets connection on a redeploy with no code change.",
   "dependencies": {
-    "@vercel/functions": "latest",
-    "googleapis": "latest",
-    "@supabase/supabase-js": "latest"
+    "@vercel/functions": "3.9.2",
+    "googleapis": "174.0.1",
+    "@supabase/supabase-js": "2.112.2"
   }
 }

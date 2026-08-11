@@ -66,10 +66,10 @@ async function checkSheet() {
   };
 
   try {
-    const auth = new google.auth.JWT(
-      email, null, key,
-      ['https://www.googleapis.com/auth/spreadsheets.readonly']
-    );
+    const auth = new google.auth.JWT({
+      email, key,
+      scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
+    });
     // Exchange the JWT for a token explicitly. Left implicit, a credential
     // failure surfaces later as a confusing "unregistered callers" 403 from
     // the Sheets API instead of the actual auth error.
