@@ -22,6 +22,8 @@ window.renderDashboard = function (D) {
 
 function runDashboard(D) {
   const { TODAY, EARLIEST, MATURITY_DAYS, DAILY_SPEND, LEADS } = D;
+  const OPTINS = D.OPTINS || [];
+  const ATTRIBUTION = D.ATTRIBUTION || null;
 
   // TEMP diagnostic -- always-visible, no DevTools needed. Shows exactly
   // what reached the renderer: which data path was used (live/mock,
@@ -179,6 +181,12 @@ function runDashboard(D) {
   }
   function spendFor(from, to) {
     return DAILY_SPEND.filter(r => r.date >= from && r.date <= to && rowMatchesFilters(r));
+  }
+  function optinsFor(from, to) {
+    return OPTINS.filter(o =>
+      o.generatedDate >= from && o.generatedDate <= to &&
+      (o.campaign === null ? filtersAllOpen() : rowMatchesFilters(o))
+    );
   }
 
   // ------------------------------------------------------------- filter bar
@@ -343,43 +351,71 @@ function runDashboard(D) {
     return matured.length ? matured[matured.length - 1] : null;
   }
 
+  // Downloads and bookings are deliberately separate numbers. A guide
+  // download is not a lead; cost per lead divides spend by booked meetings,
+  // which is a far smaller denominator and a far higher, truer figure.
   function renderKpisJourney() {
-    if (LEADS.length === 0) {
-      document.getElementById('kpi-journey').innerHTML = `
+    const { from, to } = state;
+    const grid = document.getElementById('kpi-journey');
+
+    if (OPTINS.length === 0 && LEADS.length === 0) {
+      grid.innerHTML = `
         <div class="kpi" style="grid-column:1/-1"><div class="l">Customer journey</div>
-        <div class="v" style="font-size:15px;color:var(--ink-3);line-height:1.5">No lead source is connected, so nothing past the ad click can be measured yet.<br>
-        Booked appointments, attendance, approvals and settlements need the Calendly/ClickFunnels opt-in ledger (Google Sheet) and the MyCRM outcome data.</div></div>`;
-      document.getElementById('journey-week-note').textContent = `Ad-side metrics above are live from Meta ${DASH} this block stays empty until the lead data is wired up`;
+        <div class="v" style="font-size:15px;color:var(--ink-3);line-height:1.5">No opt-in or booking data has synced yet, so nothing past the ad click can be measured.</div></div>`;
+      document.getElementById('journey-week-note').textContent = `Ad-side metrics above are live from Meta ${DASH} this block fills in once the sync runs`;
       return;
     }
 
-    const cohortWeek = mostRecentMaturedCohortWeek(state.from, state.to);
+    const spend = spendFor(from, to).reduce((s, r) => s + r.spend, 0);
+    const downloads = optinsFor(from, to).length;
+    const bookings = leadsFor(from, to);
+    const booked = bookings.length;
 
-    if (!cohortWeek) {
-      document.getElementById('kpi-journey').innerHTML = `
-        <div class="kpi" style="grid-column:1/-1"><div class="l">Customer journey</div>
-        <div class="v" style="font-size:15px;color:var(--ink-3)">No cohort in the selected range has matured yet (needs ${MATURITY_DAYS}+ days). Widen the date range to see this block.</div></div>`;
-      document.getElementById('journey-week-note').textContent = DASH;
-      return;
-    }
+    const costPerDownload = downloads ? spend / downloads : null;
+    const costPerLead = booked ? spend / booked : null;
+    const downloadToBooking = downloads ? (booked / downloads) * 100 : null;
 
-    const cohortLeads = LEADS.filter(l => weekStartOf(l.generatedDate) === cohortWeek && (l.campaign === null ? filtersAllOpen() : rowMatchesFilters(l)));
-    const cohortSpend = DAILY_SPEND.filter(r => weekStartOf(r.date) === cohortWeek && rowMatchesFilters(r)).reduce((s, r) => s + r.spend, 0);
-    const attended = cohortLeads.filter(l => l.attended).length;
-    const optionsSent = cohortLeads.filter(l => l.optionsSent).length;
-    const approved = cohortLeads.filter(l => l.approved).length;
-    const settled = cohortLeads.filter(l => l.settled).length;
-    const attendanceRate = cohortLeads.length ? (attended / cohortLeads.length) * 100 : null;
-    const costPerSettlement = settled ? cohortSpend / settled : null;
+    // Attendance is only meaningful over bookings where someone actually
+    // recorded an outcome. Dividing by all bookings would read every blank
+    // cell as a no-show.
+    const withOutcome = bookings.filter(b => b.attendanceRecorded);
+    const attended = withOutcome.filter(b => b.attended).length;
+    const attendanceRate = withOutcome.length ? (attended / withOutcome.length) * 100 : null;
 
-    document.getElementById('kpi-journey').innerHTML = `
-      <div class="kpi"><div class="l">Attendance Rate</div><div class="v">${attendanceRate != null ? attendanceRate.toFixed(0) : DASH}<small>%</small></div><div class="d">${attended} of ${cohortLeads.length} bookings</div></div>
-      <div class="kpi"><div class="l">Options Sent</div><div class="v">${optionsSent}</div><div class="d">cohort: ${fmtDate(cohortWeek)}</div></div>
-      <div class="kpi"><div class="l">Approvals</div><div class="v">${approved}</div><div class="d">cohort: ${fmtDate(cohortWeek)}</div></div>
-      <div class="kpi"><div class="l">Settlements</div><div class="v">${settled}</div><div class="d">cohort: ${fmtDate(cohortWeek)}</div></div>
-      <div class="kpi"><div class="l">Cost per Settlement</div><div class="v">${fmtMoney(costPerSettlement)}</div><div class="note">cohort spend basis, not same-week</div></div>
+    grid.innerHTML = `
+      <div class="kpi">
+        <div class="l">Guide Downloads</div>
+        <div class="v">${downloads.toLocaleString()}</div>
+        <div class="d">${costPerDownload != null ? fmtMoney(costPerDownload) + ' each' : 'no spend in range'}</div>
+      </div>
+      <div class="kpi">
+        <div class="l">Qualified Leads (booked)</div>
+        <div class="v">${booked.toLocaleString()}</div>
+        <div class="d">meetings booked, not downloads</div>
+      </div>
+      <div class="kpi">
+        <div class="l">Download ${DASH_EN} Booking</div>
+        <div class="v">${downloadToBooking != null ? downloadToBooking.toFixed(1) : DASH}<small>%</small></div>
+        <div class="d">${downloads ? `${booked} of ${downloads.toLocaleString()} downloads booked` : DASH}</div>
+      </div>
+      <div class="kpi">
+        <div class="l">Cost per Qualified Lead</div>
+        <div class="v">${fmtMoney(costPerLead)}</div>
+        <div class="note">spend / booked meetings</div>
+      </div>
+      <div class="kpi">
+        <div class="l">Attendance Rate</div>
+        <div class="v">${attendanceRate != null ? attendanceRate.toFixed(0) : DASH}<small>%</small></div>
+        <div class="d">${withOutcome.length
+          ? `${attended} of ${withOutcome.length} with an outcome recorded`
+          : 'no attendance recorded on any booking'}</div>
+      </div>
     `;
-    document.getElementById('journey-week-note').textContent = `Cohort: leads generated week of ${fmtDate(cohortWeek)} ${DASH} fully matured`;
+
+    const unattributed = ATTRIBUTION ? ATTRIBUTION.bookings - ATTRIBUTION.bookingsAttributed : null;
+    document.getElementById('journey-week-note').textContent =
+      `${fmtDate(from)} ${DASH_EN} ${fmtDate(to)}`
+      + (unattributed ? ` ${MIDDOT} ${unattributed} of ${ATTRIBUTION.bookings} bookings carry no campaign, so cost per lead counts spend against the attributed ones only` : '');
   }
 
   function renderUnattributed() {
@@ -390,9 +426,15 @@ function runDashboard(D) {
     if (allLeads.length === 0) { block.style.display = 'none'; return; }
     block.style.display = '';
     const unattr = allLeads.filter(l => l.campaign === null).length;
+    if (unattr === 0) { block.style.display = 'none'; return; }
     const pct = (unattr / allLeads.length) * 100;
+    // These bookings are real and the spend behind them is real, but their
+    // utm_campaign is missing or too vague to name a campaign ("paid" says a
+    // campaign was involved, not which). Per-campaign cost per lead is
+    // therefore an upper bound: the same spend produced these too.
     block.innerHTML =
-      `<b>${fmtPct(pct)} unattributed</b> ${DASH} ${unattr} of ${allLeads.length} bookings in range arrived without a usable campaign source (broken UTM/match-key chain). Real cost, invisible in the table below.`;
+      `<b>${fmtPct(pct)} of bookings unattributed</b> ${DASH} ${unattr} of ${allLeads.length} in range carry no usable campaign in their UTM tags. `
+      + `They are counted in the totals above but cannot be credited to a campaign below, so per-campaign cost per lead reads higher than the truth.`;
   }
 
   // ---------------------------------------------------------------- funnel
@@ -414,13 +456,13 @@ function runDashboard(D) {
 
     const rangeLeads = leadsFor(from, to);
     const booked = rangeLeads.length;
-    const attended = rangeLeads.filter(l => l.attended).length;
-    const optionsSent = rangeLeads.filter(l => l.optionsSent).length;
-    const approved = rangeLeads.filter(l => l.approved).length;
-    const settled = rangeLeads.filter(l => l.settled).length;
+    const downloads = optinsFor(from, to).length;
+    const withOutcome = rangeLeads.filter(l => l.attendanceRecorded);
+    const attended = withOutcome.filter(l => l.attended).length;
 
     const costPer = (n) => n ? '$' + (spend / n).toFixed(n < 100 ? 0 : 2) + ' each' : null;
-    const leadsConnected = LEADS.length > 0;
+    const optinsConnected = OPTINS.length > 0;
+    const bookingsConnected = LEADS.length > 0;
     const pagesConnected = lpViews > 0;
 
     // `source` is what makes an empty stage readable: a real zero from a
@@ -433,11 +475,18 @@ function runDashboard(D) {
       { name: 'Link Clicks', value: linkClicks, pctOf: impressions, meta: costPer(linkClicks), source: true },
       { name: 'Left Meta for Site', value: outbound, pctOf: linkClicks, meta: costPer(outbound), source: outbound > 0 },
       { name: 'Landing Page Views', value: lpViews, pctOf: outbound || linkClicks, meta: pagesConnected ? costPer(lpViews) : 'ClickFunnels not mapped', source: pagesConnected },
-      { name: 'Appointments Booked', value: booked, pctOf: lpViews || outbound || linkClicks, meta: leadsConnected ? costPer(booked) : 'no lead source connected', source: leadsConnected },
-      { name: 'Appointment Attended', value: attended, pctOf: booked, meta: leadsConnected ? null : 'needs CRM', source: leadsConnected },
-      { name: 'Options Sent', value: optionsSent, pctOf: attended, meta: leadsConnected ? null : 'needs CRM', source: leadsConnected },
-      { name: 'Approved', value: approved, pctOf: optionsSent, meta: leadsConnected ? null : 'needs CRM', source: leadsConnected },
-      { name: 'Settled', value: settled, pctOf: approved, meta: leadsConnected ? costPer(settled) : 'needs CRM', source: leadsConnected },
+      { name: 'Guide Downloads', value: downloads, pctOf: lpViews || outbound || linkClicks, meta: optinsConnected ? costPer(downloads) : 'opt-in sheet not synced', source: optinsConnected },
+      { name: 'Meetings Booked', value: booked, pctOf: downloads || lpViews || outbound, meta: bookingsConnected ? costPer(booked) : 'booking sheet not synced', source: bookingsConnected },
+      {
+        name: 'Meeting Attended',
+        value: attended,
+        pctOf: withOutcome.length || null,
+        // Measured only over bookings with an outcome recorded. Against all
+        // bookings this would read near zero, because the column is blank
+        // on nearly every row rather than because nobody showed up.
+        meta: withOutcome.length ? `of ${withOutcome.length} with an outcome recorded` : 'attendance not filled in on any booking',
+        source: withOutcome.length > 0,
+      },
     ];
 
     const max = impressions || 1;
@@ -559,6 +608,7 @@ function runDashboard(D) {
     const { from, to } = state;
     const rangeSpend = spendFor(from, to);
     const rangeLeads = leadsFor(from, to);
+    const rangeOptins = optinsFor(from, to);
 
     // Campaigns present in this range/filter combo -- read off the data,
     // not a fixed list. Audience/Creative/Landing Page shown are whatever
@@ -574,19 +624,17 @@ function runDashboard(D) {
       const ctr = impressions ? (linkClicks / impressions) * 100 : null;
       const cpc = linkClicks ? spend / linkClicks : null;
 
-      const leads = rangeLeads.filter(l => l.campaign === name);
-      const appts = leads.length;
-      const anyMatured = leads.some(l => l.matured);
-      const settled = leads.filter(l => l.settled).length;
-      const costPerSettlement = settled ? spend / settled : null;
+      const bookings = rangeLeads.filter(l => l.campaign === name).length;
+      const downloads = rangeOptins.filter(o => o.campaign === name).length;
+      const costPerLead = bookings ? spend / bookings : null;
 
-      // Ranked on cost per link click while settlement data is unavailable.
-      // Grading every campaign 'critical' for having no settlements, when no
-      // system is reporting settlements at all, would flag the whole account
-      // red and say nothing about which campaigns are actually working.
+      // Ranked on cost per qualified lead where bookings exist, and on cost
+      // per click otherwise. Grading a campaign 'critical' for having no
+      // bookings when most bookings carry no campaign at all would condemn
+      // campaigns for a gap in attribution rather than in performance.
       let status;
-      if (anyMatured && costPerSettlement != null) {
-        status = costPerSettlement < 700 ? 'good' : costPerSettlement < 1500 ? 'warning' : 'critical';
+      if (costPerLead != null) {
+        status = costPerLead < 150 ? 'good' : costPerLead < 400 ? 'warning' : 'critical';
       } else if (cpc == null) {
         status = null;
       } else {
@@ -595,7 +643,7 @@ function runDashboard(D) {
 
       return {
         name, audience: spendRows[0].audience, creative: spendRows[0].creative, landingPage: spendRows[0].landingPage,
-        spend, impressions, linkClicks, ctr, cpc, appts, settled, costPerSettlement, status, anyMatured,
+        spend, impressions, linkClicks, ctr, cpc, downloads, bookings, costPerLead, status,
       };
     });
 
@@ -610,7 +658,7 @@ function runDashboard(D) {
       return (av - bv) * dir;
     });
 
-    const noLeadSource = LEADS.length === 0;
+    const noBookings = LEADS.length === 0;
     document.getElementById('campaign-table-body').innerHTML = rows.map(r => `
       <tr>
         <td>${r.status ? `<span class="status-dot ${r.status}"></span>` : ''}${escapeHtml(r.name)}</td>
@@ -621,10 +669,11 @@ function runDashboard(D) {
         <td>${r.linkClicks.toLocaleString()}</td>
         <td>${r.ctr != null ? r.ctr.toFixed(2) + '%' : DASH}</td>
         <td>${r.cpc != null ? '$' + r.cpc.toFixed(2) : DASH}</td>
-        <td>${noLeadSource ? `<span class="pending">${DASH}</span>` : r.appts}</td>
-        <td>${noLeadSource ? `<span class="pending">${DASH}</span>` : (r.anyMatured ? fmtMoney(r.costPerSettlement) : `<span class="pending">maturing</span>`)}</td>
+        <td>${r.downloads || `<span class="pending">${DASH}</span>`}</td>
+        <td>${noBookings ? `<span class="pending">${DASH}</span>` : r.bookings}</td>
+        <td>${fmtMoney(r.costPerLead)}</td>
       </tr>
-    `).join('') || `<tr><td colspan="10" style="color:var(--ink-3);font-style:italic">No campaigns match the current filters.</td></tr>`;
+    `).join('') || `<tr><td colspan="11" style="color:var(--ink-3);font-style:italic">No campaigns match the current filters.</td></tr>`;
 
     document.querySelectorAll('#campaign-table th[data-key]').forEach(th => {
       th.classList.toggle('sorted', th.dataset.key === sortState.key);

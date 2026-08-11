@@ -131,8 +131,9 @@ window.bootLog('inline boot script ran');
           <th data-key="linkClicks">Link Clicks</th>
           <th data-key="ctr">CTR</th>
           <th data-key="cpc">Cost/Click</th>
-          <th data-key="appts">Appts</th>
-          <th data-key="costPerSettlement">Cost/Settlement</th>
+          <th data-key="downloads">Downloads</th>
+          <th data-key="bookings">Booked</th>
+          <th data-key="costPerLead">Cost/Lead</th>
         </tr>
       </thead>
       <tbody id="campaign-table-body"></tbody>
@@ -144,9 +145,9 @@ window.bootLog('inline boot script ran');
   Ascendra Financial &middot; internal reporting prototype. Pulls live data from Meta, ClickFunnels, and the Sheet ledger via <code>/api/data</code> when configured; falls back to sample data otherwise (see the badge above).
 </footer>
 
-<script src="app.js?v=2026081105"></script>
+<script src="app.js?v=2026081106"></script>
 <script>window.bootLog('app.js tag done, renderDashboard=' + typeof window.renderDashboard);</script>
-<script src="data.js?v=2026081105"></script>
+<script src="data.js?v=2026081106"></script>
 <script>window.bootLog('data.js tag done (its own async work may still be running)');</script>
 <script>
   fetch('/api/auth/me').then(r => r.json()).then(d => {

@@ -86,10 +86,6 @@
         for (let i = 0; i < bookings; i++) {
           const unattributed = rng() < 0.04;
           const attended = rng() < 0.76;
-          const optionsSent = attended && rng() < 0.72;
-          const approved = optionsSent && rng() < 0.67;
-          const canHaveSettled = approved && matured;
-          const settled = canHaveSettled && rng() < 0.72;
 
           LEADS.push({
             id: 'L' + (leadSeq++),
@@ -98,13 +94,15 @@
             audience: unattributed ? null : c.audience,
             creative: unattributed ? null : c.creative,
             landingPage: unattributed ? null : c.landingPage,
-            attended, optionsSent, approved, settled, matured,
+            attended, attendanceRecorded: true, matured,
           });
         }
       }
     }
 
-    return { DATES, TODAY, EARLIEST, MATURITY_DAYS, DAILY_SPEND, LEADS };
+    // Sample bookings stand in for both stages; the mock exists only so the
+    // shell has something to draw before live data arrives.
+    return { DATES, TODAY, EARLIEST, MATURITY_DAYS, DAILY_SPEND, LEADS, OPTINS: [], ATTRIBUTION: null };
   }
 
   // -------------------------------------------------------------- live data
@@ -166,7 +164,11 @@
     // number below "Ad Clicks" was then invented, while the page presented
     // them identically to the real Meta figures above. That is worse than
     // an empty section on a dashboard meant for spend decisions.
+    // leads are booked meetings (the qualified lead); optins are guide
+    // downloads, an earlier and much larger stage. Cost per lead is measured
+    // against the former.
     const leadsRaw = json.leads || [];
+    const optins = json.optins || [];
     const leadsMissing = leadsRaw.length === 0;
 
     const leads = leadsRaw.map(l => {
@@ -175,7 +177,9 @@
     });
 
     return {
-      DATES: dates, TODAY: today, EARLIEST: earliest, MATURITY_DAYS, DAILY_SPEND: dailySpend, LEADS: leads,
+      DATES: dates, TODAY: today, EARLIEST: earliest, MATURITY_DAYS,
+      DAILY_SPEND: dailySpend, LEADS: leads, OPTINS: optins,
+      ATTRIBUTION: json.attribution || null,
       placeholders: { leadsMissing, landingPage: landingPagePlaceholder },
     };
   }
