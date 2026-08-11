@@ -101,63 +101,27 @@
   }
 
   // -------------------------------------------------------------- live data
+  // Deliberately linear: one fetch, one parse, one timeout. An earlier
+  // version raced an AbortController, two setInterval tickers, an 8s parse
+  // timeout and a 15s watchdog against each other; that could wedge with the
+  // badge frozen mid-stage and no render ever happening. Fewer moving parts
+  // is the fix -- fetch() with an AbortSignal covers the only case that can
+  // actually hang (a stalled network), and everything after it is fast.
   async function loadLiveData() {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 52000); // stay above api/data.js's own 45s source timeout
-
-    const startedAt = Date.now();
     const badgeEl = document.getElementById('source-badge');
-    function setStage(text) { if (badgeEl) badgeEl.textContent = text; }
-    setStage(`[stage: about to call fetch()] 0s elapsed`);
-    const tick = setInterval(() => {
-      setStage(`[stage: awaiting fetch() response] ${Math.round((Date.now() - startedAt) / 1000)}s elapsed`);
-    }, 1000);
+    const setStage = (text) => { if (badgeEl) badgeEl.textContent = text; };
 
-    try {
-      let res;
-      try {
-        res = await fetch('/api/data', { signal: controller.signal, cache: 'no-store' });
-      } catch (fetchErr) {
-        clearInterval(tick);
-        setStage(`[stage: fetch() itself threw] ${fetchErr.name}: ${fetchErr.message}`);
-        throw fetchErr;
-      }
-      clearInterval(tick);
-      const bodyStartedAt = Date.now();
-      setStage(`[stage: got HTTP ${res.status}, reading body] ${Math.round((bodyStartedAt - startedAt) / 1000)}s elapsed`);
-      if (!res.ok) { setStage(`[stage: response not ok, status ${res.status}]`); return null; }
-      // fetch() resolving only means headers arrived -- the AbortController
-      // above stops protecting us the moment that happens. If the body then
-      // arrives slowly or the stream stalls, res.json() has no timeout of
-      // its own and can hang forever with no error and no fallback. Race the
-      // parse against its own clock so a stalled body always resolves (to
-      // the mock-data fallback) instead of hanging indefinitely. This also
-      // ticks its own live counter -- previously the badge froze on one
-      // static string the whole time it was reading, which was impossible
-      // to tell apart from actually being stuck.
-      const BODY_TIMEOUT_MS = 8000;
-      const bodyTick = setInterval(() => {
-        setStage(`[stage: reading body] ${Math.round((Date.now() - bodyStartedAt) / 1000)}s / ${BODY_TIMEOUT_MS / 1000}s before falling back to sample data`);
-      }, 1000);
-      let json;
-      try {
-        json = await Promise.race([
-          res.json(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error(`res.json() did not resolve within ${BODY_TIMEOUT_MS}ms`)), BODY_TIMEOUT_MS)),
-        ]);
-      } catch (parseErr) {
-        setStage(`[stage: res.json() threw or timed out] ${parseErr.name || 'Error'}: ${parseErr.message}`);
-        throw parseErr;
-      } finally {
-        clearInterval(bodyTick);
-      }
-      setStage(`[stage: parsed JSON, ${(json.dailySpend || []).length} rows, source: ${json.dataSource || 'unknown'}]`);
-      if (!json || !Array.isArray(json.dailySpend) || json.dailySpend.length === 0) return { empty: true, meta: json };
-      return { empty: false, meta: json };
-    } finally {
-      clearTimeout(timer);
-      clearInterval(tick);
-    }
+    setStage('Loading data from /api/data...');
+    const res = await fetch('/api/data', {
+      signal: AbortSignal.timeout(30000),
+      cache: 'no-store',
+    });
+    if (!res.ok) throw new Error(`/api/data returned HTTP ${res.status}`);
+
+    const json = await res.json();
+    const rows = (json && Array.isArray(json.dailySpend)) ? json.dailySpend.length : 0;
+    setStage(`Parsed ${rows} rows, rendering...`);
+    return { empty: rows === 0, meta: json };
   }
 
   // Live Meta data always has real campaign/audience/creative/spend/clicks --
@@ -243,25 +207,6 @@
   }
 
   // ------------------------------------------------------------------ boot
-  // Absolute last resort, covering anything above that could hang in a way
-  // its own timeout didn't catch (an unforeseen bug, not just a slow
-  // network): if nothing has rendered within WATCHDOG_MS of page load,
-  // force a mock-data render rather than leave the page blank forever with
-  // no visible reason why. bootSettled prevents this from double-rendering
-  // if the normal path finishes around the same time.
-  let bootSettled = false;
-  const WATCHDOG_MS = 15000;
-  const watchdog = setTimeout(() => {
-    if (bootSettled) return;
-    bootSettled = true;
-    const data = buildMockData();
-    window.DASHBOARD_DATA = data;
-    window.DASHBOARD_SOURCE_INFO = { mode: 'mock', error: `boot watchdog fired after ${WATCHDOG_MS}ms -- something hung with no error of its own` };
-    const el = document.getElementById('source-badge');
-    if (el) { el.textContent = `Sample data ${DASH} boot watchdog fired, see DIAG panel for details`; el.className = 'source-badge mock'; }
-    if (typeof window.renderDashboard === 'function') window.renderDashboard(data);
-  }, WATCHDOG_MS);
-
   let data, sourceInfo;
   try {
     const live = await loadLiveData();
@@ -283,10 +228,6 @@
     data = buildMockData();
     sourceInfo = { mode: 'mock', error: `${e.name}: ${e.message}` };
   }
-
-  if (bootSettled) return; // watchdog already forced a render -- don't do it twice
-  bootSettled = true;
-  clearTimeout(watchdog);
 
   window.DASHBOARD_DATA = data;
   window.DASHBOARD_SOURCE_INFO = sourceInfo;
