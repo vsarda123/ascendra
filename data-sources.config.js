@@ -24,7 +24,10 @@ module.exports = {
     // campaigns below point here; the page's views are counted once and
     // apportioned between them by clicks.
     { campaign: 'Instagram Redirect Campaign', clickfunnelsPageIds: [23502291, 23607310], landingPage: '/b-o-o-k-i-n-g' },
-    { campaign: 'PROS | Property Strategy | Website Leads | A', clickfunnelsPageIds: [23502291, 23607310], landingPage: '/b-o-o-k-i-n-g' },
+    // Full name taken from a booking's utm_campaign value, which arrives
+    // URL-encoded ("PROS+|+Property+Strategy+|+Website+Leads+|+Aug+2026+|+$3K").
+    // The earlier guess stopped at "| A" and so matched no campaign at all.
+    { campaign: 'PROS | Property Strategy | Website Leads | Aug 2026 | $3K', clickfunnelsPageIds: [23502291, 23607310], landingPage: '/b-o-o-k-i-n-g' },
 
     // Page 23693120 (Strategic Lending Framework) is deliberately unmapped:
     // no campaign currently drives it, and its 66 opt-ins arrived from
@@ -46,5 +49,20 @@ module.exports = {
     // these downloads are real but unpaid, and attributing them to a
     // campaign would invent spend behind them.
     { tab: 'Property investing strategy', campaign: null, landingPage: '/property-investment-strategy' },
+  ],
+
+  // The tab of the bookings workbook that Zapier appends to. Its other tabs
+  // ("April 2026", "Lead Magnets ", "Marketing Dashboard", "Meta Raw Data")
+  // are hand-maintained summaries, not the ledger, and reading them would
+  // double-count against the raw rows they summarise.
+  BOOKINGS_TAB: 'Data from Zapier',
+
+  // Fallback attribution for bookings whose utm_campaign is missing. Only
+  // values that identify one campaign unambiguously belong here: "paid"
+  // (191 bookings), "Paid" and "paid_social" say a campaign was involved but
+  // not which, so they must stay unmapped rather than be assigned a guess.
+  UTM_MEDIUM_CAMPAIGN_MAP: [
+    { utmMedium: 'debt_recycling', campaign: 'Debt Recycling Lead magnet campaign' },
+    { utmMedium: 'trust_strategy', campaign: 'Trust Strategy Lead magnet campaign' },
   ],
 };

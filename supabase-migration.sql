@@ -32,3 +32,20 @@ alter table daily_spend add column if not exists conversion_rate_ranking  text;
 -- magnet, and currently the only evidence of which campaign produced the
 -- lead, so it is worth keeping even once a campaign has been mapped to it.
 alter table leads add column if not exists source_tab text;
+
+-- A row in `leads` is now one of two very different things: an 'optin' (a
+-- guide download, top of funnel) or a 'booking' (a meeting booked, the
+-- qualified lead that cost per lead is measured against). Conflating them
+-- understates CPL by counting every download as a lead.
+alter table leads add column if not exists kind text not null default 'optin';
+
+-- Attribution as recorded on the booking. utm_campaign carries the numeric
+-- Meta campaign ID, which is the exact join back to spend.
+alter table leads add column if not exists utm_campaign text;
+alter table leads add column if not exists utm_medium   text;
+alter table leads add column if not exists utm_source   text;
+
+-- Whether an attendance outcome was recorded at all, as distinct from a
+-- recorded no-show. The column is blank on all but one booking, so without
+-- this the dashboard would report a ~0% attendance rate as if it were real.
+alter table leads add column if not exists attendance_recorded boolean not null default false;

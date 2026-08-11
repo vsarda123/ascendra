@@ -1,7 +1,7 @@
 const { getSupabase } = require('../../lib/supabase');
 const {
   isoDate, addDays, withTimeout,
-  fetchMetaInsights, fetchClickFunnelsWeekly, fetchSheetLeads, discoverClickFunnelsPages,
+  fetchMetaInsights, fetchClickFunnelsWeekly, fetchSheetLeads, fetchBookings, discoverClickFunnelsPages,
   mergeDailySpend,
 } = require('../../lib/sources');
 
@@ -55,7 +55,7 @@ module.exports = async (req, res) => {
     );
   }
 
-  if (process.env.GOOGLE_SHEETS_CLIENT_EMAIL && process.env.GOOGLE_SHEETS_PRIVATE_KEY && process.env.GOOGLE_SHEET_ID) {
+  if (process.env.GOOGLE_SHEETS_PRIVATE_KEY && process.env.GOOGLE_SHEET_ID) {
     tasks.push(
       withTimeout(fetchSheetLeads(), SOURCE_TIMEOUT_MS, 'Google Sheets')
         .then((rows) => { leads = rows; sources.sheets = true; })
@@ -64,6 +64,24 @@ module.exports = async (req, res) => {
   }
 
   await Promise.allSettled(tasks);
+
+  // Bookings are fetched after Meta, not alongside it: their utm_campaign
+  // holds a numeric Meta campaign ID, and turning that into a campaign name
+  // needs the insights rows to have arrived first.
+  const campaignIdToName = {};
+  for (const r of metaRows) {
+    if (r.campaignId) campaignIdToName[r.campaignId] = r.campaign;
+  }
+
+  let bookings = [];
+  if (process.env.GOOGLE_BOOKINGS_SHEET_ID && process.env.GOOGLE_SHEETS_PRIVATE_KEY) {
+    try {
+      bookings = await withTimeout(fetchBookings(campaignIdToName), SOURCE_TIMEOUT_MS, 'Bookings sheet');
+      sources.bookings = true;
+    } catch (e) {
+      errors.bookings = e.message;
+    }
+  }
 
   const dailySpend = mergeDailySpend(metaRows, cfByCampaign);
 
@@ -127,24 +145,42 @@ module.exports = async (req, res) => {
     if (error) errors.supabaseWriteSpend = error.message;
   }
 
-  if (leads.length) {
-    const { error } = await supabase.from('leads').upsert(
-      leads.map(l => ({
-        id: l.id,
-        generated_date: l.generatedDate,
-        campaign: l.campaign,
-        audience: l.audience,
-        creative: l.creative,
-        landing_page: l.landingPage,
-        source_tab: l.sourceTab || null,
-        attended: l.attended,
-        options_sent: l.optionsSent,
-        approved: l.approved,
-        settled: l.settled,
-        updated_at: new Date().toISOString(),
-      })),
-      { onConflict: 'id' }
-    );
+  // Opt-ins and bookings share the table, told apart by `kind`. A download
+  // is not a lead, and cost per lead measured against downloads understates
+  // the true figure by however many never book.
+  const leadRows = [
+    ...leads.map(l => ({
+      id: l.id,
+      kind: 'optin',
+      generated_date: l.generatedDate,
+      campaign: l.campaign,
+      audience: l.audience,
+      creative: l.creative,
+      landing_page: l.landingPage,
+      source_tab: l.sourceTab || null,
+      attended: false,
+      attendance_recorded: false,
+      updated_at: new Date().toISOString(),
+    })),
+    ...bookings.map(b => ({
+      id: b.id,
+      kind: 'booking',
+      generated_date: b.generatedDate,
+      campaign: b.campaign,
+      audience: b.audience,
+      creative: b.creative,
+      landing_page: b.landingPage,
+      utm_campaign: b.utmCampaign,
+      utm_medium: b.utmMedium,
+      utm_source: b.utmSource,
+      attended: b.attended,
+      attendance_recorded: b.attendanceRecorded,
+      updated_at: new Date().toISOString(),
+    })),
+  ];
+
+  if (leadRows.length) {
+    const { error } = await supabase.from('leads').upsert(leadRows, { onConflict: 'id' });
     if (error) errors.supabaseWriteLeads = error.message;
   }
 
@@ -162,7 +198,10 @@ module.exports = async (req, res) => {
     sources,
     errors,
     dailySpendCount: dedupedDailySpend.length,
-    leadsCount: leads.length,
+    optinCount: leads.length,
+    bookingCount: bookings.length,
+    bookingsAttributed: bookings.filter(b => b.campaign).length,
+    bookingsWithAttendanceRecorded: bookings.filter(b => b.attendanceRecorded).length,
     cfPagesDiag,
     syncedAt: new Date().toISOString(),
   });

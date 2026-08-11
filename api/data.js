@@ -68,21 +68,29 @@ async function readFromSupabase(since, until) {
     engagementRateRanking: r.engagement_rate_ranking || null,
     conversionRateRanking: r.conversion_rate_ranking || null,
   }));
-  const leads = (leadsData || []).map(l => ({
+  const mapped = (leadsData || []).map(l => ({
     id: l.id,
+    kind: l.kind || 'optin',
     generatedDate: l.generated_date,
     campaign: l.campaign,
     audience: l.audience,
     creative: l.creative,
     landingPage: l.landing_page,
     sourceTab: l.source_tab || null,
+    utmCampaign: l.utm_campaign || null,
+    utmMedium: l.utm_medium || null,
+    utmSource: l.utm_source || null,
     attended: l.attended,
-    optionsSent: l.options_sent,
-    approved: l.approved,
-    settled: l.settled,
+    attendanceRecorded: l.attendance_recorded || false,
   }));
 
-  return { dailySpend, leads };
+  // Bookings are the qualified leads; opt-ins are guide downloads and a
+  // separate, earlier funnel stage.
+  return {
+    dailySpend,
+    leads: mapped.filter(l => l.kind === 'booking'),
+    optins: mapped.filter(l => l.kind === 'optin'),
+  };
 }
 
 // Fallback used only if Supabase isn't configured yet, or has no rows for
@@ -143,7 +151,8 @@ module.exports = async (req, res) => {
 
   let dailySpend = [];
   let leads = [];
-  let sources = { meta: false, clickfunnels: false, sheets: false };
+  let optins = [];
+  let sources = { meta: false, clickfunnels: false, sheets: false, bookings: false };
   let errors = {};
   let usedFallback = false;
 
@@ -152,10 +161,12 @@ module.exports = async (req, res) => {
     if (fromSupabase && fromSupabase.dailySpend.length > 0) {
       dailySpend = fromSupabase.dailySpend;
       leads = fromSupabase.leads;
+      optins = fromSupabase.optins;
       sources = {
         meta: dailySpend.length > 0,
         clickfunnels: dailySpend.some(r => r.landingPageViews > 0),
-        sheets: leads.length > 0,
+        sheets: optins.length > 0,
+        bookings: leads.length > 0,
       };
     } else {
       usedFallback = true;
@@ -168,13 +179,18 @@ module.exports = async (req, res) => {
   if (usedFallback) {
     const live = await readLive(since, until);
     dailySpend = live.dailySpend;
-    leads = live.leads;
-    sources = live.sources;
+    // The live path reads the opt-in workbook only; bookings come from a
+    // separate sheet that the sync job joins to Meta campaign IDs.
+    optins = live.leads;
+    leads = [];
+    sources = { ...live.sources, bookings: false };
     errors = { ...errors, ...live.errors };
   }
 
   console.log('DIAG /api/data', JSON.stringify({
-    since, until, usedFallback, dailySpendCount: dailySpend.length, leadsCount: leads.length, sources, errors,
+    since, until, usedFallback,
+    dailySpendCount: dailySpend.length, bookingCount: leads.length, optinCount: optins.length,
+    sources, errors,
   }));
 
   // Which integrations have credentials at all, as booleans only -- never
@@ -183,7 +199,8 @@ module.exports = async (req, res) => {
   const config = {
     meta: Boolean(process.env.META_ACCESS_TOKEN && process.env.META_AD_ACCOUNT_ID),
     clickfunnels: Boolean(process.env.CLICKFUNNELS_API_TOKEN && process.env.CLICKFUNNELS_SUBDOMAIN),
-    sheets: Boolean(process.env.GOOGLE_SHEETS_CLIENT_EMAIL && process.env.GOOGLE_SHEETS_PRIVATE_KEY && process.env.GOOGLE_SHEET_ID),
+    sheets: Boolean(process.env.GOOGLE_SHEETS_PRIVATE_KEY && process.env.GOOGLE_SHEET_ID),
+    bookings: Boolean(process.env.GOOGLE_SHEETS_PRIVATE_KEY && process.env.GOOGLE_BOOKINGS_SHEET_ID),
     supabase: Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY),
     campaignPageMappings: CAMPAIGN_PAGE_MAP.length,
     // A mapping is matched on the exact campaign name Meta reports, so a
@@ -195,7 +212,15 @@ module.exports = async (req, res) => {
   };
 
   res.status(200).json({
-    sources, errors, config, since, until, dailySpend, leads,
+    sources, errors, config, since, until, dailySpend, leads, optins,
+    // How much of the booking ledger can be tied to a campaign at all. A
+    // cost per lead computed over attributed bookings alone is only as
+    // trustworthy as this share.
+    attribution: {
+      bookings: leads.length,
+      bookingsAttributed: leads.filter(l => l.campaign).length,
+      attendanceRecorded: leads.filter(l => l.attendanceRecorded).length,
+    },
     dataSource: usedFallback ? 'live-fallback' : 'supabase',
     generatedAt: new Date().toISOString(),
   });
