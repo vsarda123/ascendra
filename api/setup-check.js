@@ -81,23 +81,32 @@ async function checkSheet() {
     const sheets = google.sheets({ version: 'v4', auth });
 
     // Tab names are the usual culprit: the default range says 'Sheet1', and
-    // a sheet whose tab was renamed returns an error rather than rows.
+    // a sheet whose tab was renamed rejects the range outright.
     const meta = await sheets.spreadsheets.get({ spreadsheetId: GOOGLE_SHEET_ID });
     const tabs = (meta.data.sheets || []).map(s => s.properties.title);
-
-    const resp = await sheets.spreadsheets.values.get({ spreadsheetId: GOOGLE_SHEET_ID, range });
-    const rows = resp.data.values || [];
-    return {
+    const base = {
       configured: true,
       keyShape,
       serviceAccount: email,
       spreadsheetTitle: meta.data.properties && meta.data.properties.title,
       tabs,
       rangeUsed: range,
-      rowCount: rows.length,
-      columnCounts: [...new Set(rows.slice(0, 50).map(r => r.length))],
-      firstRowShape: rows[0] ? rows[0].map(c => (c ? String(c).slice(0, 3) + '...' : '(empty)')) : null,
     };
+
+    try {
+      const resp = await sheets.spreadsheets.values.get({ spreadsheetId: GOOGLE_SHEET_ID, range });
+      const rows = resp.data.values || [];
+      return {
+        ...base,
+        rowCount: rows.length,
+        columnCounts: [...new Set(rows.slice(0, 50).map(r => r.length))],
+        firstRowShape: rows[0] ? rows[0].map(c => (c ? String(c).slice(0, 3) + '...' : '(empty)')) : null,
+      };
+    } catch (rangeErr) {
+      // Reported alongside the real tab names, which is the thing needed to
+      // correct GOOGLE_SHEET_RANGE.
+      return { ...base, rangeError: rangeErr.message };
+    }
   } catch (e) {
     return { configured: true, keyShape, serviceAccount: email, rangeUsed: range, error: e.message };
   }
