@@ -9,6 +9,11 @@
   window.renderDashboard(data) once data is ready.
 */
 (async function () {
+  // Defined in index.html before this file loads; guarded anyway so this
+  // file still works if that inline block is ever removed.
+  const log = window.bootLog || function () {};
+  log('data.js IIFE entered');
+
   const MATURITY_DAYS = 35; // ~5 weeks -- a cohort is "matured" once every
   // downstream stage has had time to resolve.
 
@@ -108,14 +113,17 @@
   // is the fix -- fetch() with an AbortSignal covers the only case that can
   // actually hang (a stalled network), and everything after it is fast.
   async function loadLiveData() {
+    log('fetch(/api/data) starting');
     const res = await fetch('/api/data', {
       signal: AbortSignal.timeout(30000),
       cache: 'no-store',
     });
+    log('fetch resolved: HTTP ' + res.status + ', reading body');
     if (!res.ok) throw new Error(`/api/data returned HTTP ${res.status}`);
 
     const json = await res.json();
     const rows = (json && Array.isArray(json.dailySpend)) ? json.dailySpend.length : 0;
+    log('body parsed: ' + rows + ' dailySpend rows, dataSource=' + (json && json.dataSource));
     return { empty: rows === 0, meta: json };
   }
 
@@ -216,7 +224,9 @@
     renderSourceBadge();
     if (typeof window.renderDashboard === 'function') {
       window.renderDashboard(data);
+      log('renderDashboard() returned');
     } else {
+      log('*** window.renderDashboard is not a function -- app.js did not load');
       const banner = document.createElement('div');
       banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#d0393f;color:#fff;padding:14px 20px;font-family:monospace;font-size:12.5px;';
       banner.textContent = 'Dashboard error (send this to Claude): app.js did not load -- window.renderDashboard is not defined.';
@@ -225,23 +235,27 @@
   }
 
   data = buildMockData();
+  log('mock data built: ' + data.DAILY_SPEND.length + ' spend rows');
   sourceInfo = { mode: 'mock', loading: true };
   publish();
+  log('first render (sample data) complete');
 
   try {
     const live = await loadLiveData();
     if (live && !live.empty) {
-      const buildStart = performance.now();
       data = toDashboardData(live.meta);
-      const buildMs = Math.round(performance.now() - buildStart);
-      sourceInfo = { mode: 'live', sources: live.meta.sources, errors: live.meta.errors, dataSource: live.meta.dataSource, placeholders: data.placeholders, timings: { toDashboardDataMs: buildMs } };
+      sourceInfo = { mode: 'live', sources: live.meta.sources, errors: live.meta.errors, dataSource: live.meta.dataSource, placeholders: data.placeholders };
+      log('live data prepared: ' + data.DAILY_SPEND.length + ' spend rows, ' + data.LEADS.length + ' leads');
     } else {
       sourceInfo = { mode: 'mock', sources: live ? live.meta.sources : null, errors: live ? live.meta.errors : null };
+      log('live data was empty, staying on sample data');
     }
   } catch (e) {
     sourceInfo = { mode: 'mock', error: `${e.name}: ${e.message}` };
+    log('*** live load FAILED: ' + e.name + ': ' + e.message);
   }
   publish();
+  log('final render complete, mode=' + sourceInfo.mode);
 
   function renderSourceBadge() {
     const el = document.getElementById('source-badge');
