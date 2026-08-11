@@ -39,7 +39,12 @@ function runDashboard(D) {
     const creatives = uniq(DAILY_SPEND.map(r => r.creative));
     const landingPages = uniq(DAILY_SPEND.map(r => r.landingPage));
     const info = window.DASHBOARD_SOURCE_INFO || {};
+    // runDashboard runs twice by design (mock first, live once it arrives),
+    // so replace any previous panel rather than stacking a second one.
+    const prev = document.getElementById('diag-panel');
+    if (prev) prev.remove();
     const panel = document.createElement('div');
+    panel.id = 'diag-panel';
     panel.style.cssText = 'background:#0B0E1F;color:#00E88F;padding:10px 16px;font-family:ui-monospace,Consolas,monospace;font-size:11px;white-space:pre-wrap;border-bottom:3px solid #7B00FF;position:relative;z-index:99998;';
     panel.textContent =
       'DIAG (send this to Claude)\n' +
@@ -202,14 +207,17 @@ function runDashboard(D) {
     fromEl.min = toEl.min = EARLIEST;
     fromEl.max = toEl.max = TODAY;
 
-    presetEl.addEventListener('change', (e) => {
+    // Direct handler assignment, not addEventListener -- initFilterBar runs
+    // again on the live-data re-render, and addEventListener would stack a
+    // second copy of every handler onto the same surviving elements.
+    presetEl.onchange = (e) => {
       applyPreset(e.target.value);
       syncCustomInputs();
       updateRangeReadout();
       renderAll();
-    });
+    };
 
-    fromEl.addEventListener('change', () => {
+    fromEl.onchange = () => {
       state.preset = 'custom';
       presetEl.value = 'custom';
       state.from = clampDate(fromEl.value || state.from);
@@ -217,8 +225,8 @@ function runDashboard(D) {
       syncCustomInputs();
       updateRangeReadout();
       renderAll();
-    });
-    toEl.addEventListener('change', () => {
+    };
+    toEl.onchange = () => {
       state.preset = 'custom';
       presetEl.value = 'custom';
       state.to = clampDate(toEl.value || state.to);
@@ -226,24 +234,24 @@ function runDashboard(D) {
       syncCustomInputs();
       updateRangeReadout();
       renderAll();
-    });
+    };
 
     syncCustomInputs();
     updateRangeReadout();
 
     ['campaign', 'audience', 'creative', 'landingpage'].forEach(key => {
       const id = 'f-' + key;
-      document.getElementById(id).addEventListener('change', (e) => {
+      document.getElementById(id).onchange = (e) => {
         const stateKey = key === 'landingpage' ? 'landingPage' : key;
         state[stateKey] = e.target.value;
         renderAll();
-      });
+      };
     });
-    document.getElementById('reset-filters').addEventListener('click', () => {
+    document.getElementById('reset-filters').onclick = () => {
       Object.assign(state, { preset: 'last90', campaign: 'all', audience: 'all', creative: 'all', landingPage: 'all' });
       initFilterBar();
       renderAll();
-    });
+    };
   }
 
   // ------------------------------------------------------------------ KPIs
@@ -529,12 +537,12 @@ function runDashboard(D) {
 
   function initTableSort() {
     document.querySelectorAll('#campaign-table th[data-key]').forEach(th => {
-      th.addEventListener('click', () => {
+      th.onclick = () => {
         const key = th.dataset.key;
         if (sortState.key === key) sortState.dir *= -1;
         else { sortState.key = key; sortState.dir = 1; }
         renderTable();
-      });
+      };
     });
   }
 

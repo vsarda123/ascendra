@@ -108,10 +108,6 @@
   // is the fix -- fetch() with an AbortSignal covers the only case that can
   // actually hang (a stalled network), and everything after it is fast.
   async function loadLiveData() {
-    const badgeEl = document.getElementById('source-badge');
-    const setStage = (text) => { if (badgeEl) badgeEl.textContent = text; };
-
-    setStage('Loading data from /api/data...');
     const res = await fetch('/api/data', {
       signal: AbortSignal.timeout(30000),
       cache: 'no-store',
@@ -120,7 +116,6 @@
 
     const json = await res.json();
     const rows = (json && Array.isArray(json.dailySpend)) ? json.dailySpend.length : 0;
-    setStage(`Parsed ${rows} rows, rendering...`);
     return { empty: rows === 0, meta: json };
   }
 
@@ -207,34 +202,55 @@
   }
 
   // ------------------------------------------------------------------ boot
+  // Render is never gated on the network. Sample data paints the full
+  // dashboard within milliseconds of the script running, then the live Meta
+  // numbers replace it in place once /api/data answers. Previously a single
+  // slow or stalled fetch left every section permanently blank, because
+  // nothing rendered at all until the request had resolved one way or the
+  // other -- there was no reason for the shell to wait on it.
   let data, sourceInfo;
+
+  function publish() {
+    window.DASHBOARD_DATA = data;
+    window.DASHBOARD_SOURCE_INFO = sourceInfo;
+    renderSourceBadge();
+    if (typeof window.renderDashboard === 'function') {
+      window.renderDashboard(data);
+    } else {
+      const banner = document.createElement('div');
+      banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#d0393f;color:#fff;padding:14px 20px;font-family:monospace;font-size:12.5px;';
+      banner.textContent = 'Dashboard error (send this to Claude): app.js did not load -- window.renderDashboard is not defined.';
+      document.body.prepend(banner);
+    }
+  }
+
+  data = buildMockData();
+  sourceInfo = { mode: 'mock', loading: true };
+  publish();
+
   try {
     const live = await loadLiveData();
     if (live && !live.empty) {
-      // Timed explicitly and surfaced in the DIAG panel -- "the page freezes"
-      // is consistent with either an async wait (doesn't block the tab) or a
-      // genuine synchronous computation (does block the tab, feels like a
-      // real freeze). This turns that distinction into a measured number
-      // instead of another guess.
       const buildStart = performance.now();
       data = toDashboardData(live.meta);
       const buildMs = Math.round(performance.now() - buildStart);
       sourceInfo = { mode: 'live', sources: live.meta.sources, errors: live.meta.errors, dataSource: live.meta.dataSource, placeholders: data.placeholders, timings: { toDashboardDataMs: buildMs } };
     } else {
-      data = buildMockData();
       sourceInfo = { mode: 'mock', sources: live ? live.meta.sources : null, errors: live ? live.meta.errors : null };
     }
   } catch (e) {
-    data = buildMockData();
     sourceInfo = { mode: 'mock', error: `${e.name}: ${e.message}` };
   }
-
-  window.DASHBOARD_DATA = data;
-  window.DASHBOARD_SOURCE_INFO = sourceInfo;
+  publish();
 
   function renderSourceBadge() {
     const el = document.getElementById('source-badge');
     if (!el) return;
+    if (sourceInfo.loading) {
+      el.textContent = `Sample data shown ${DASH} loading live Meta data...`;
+      el.className = 'source-badge mock';
+      return;
+    }
     if (sourceInfo.mode === 'live') {
       const s = sourceInfo.sources || {};
       const p = sourceInfo.placeholders || {};
@@ -252,19 +268,5 @@
       el.textContent = sourceInfo.error ? `Sample data ${DASH} live fetch failed: ${sourceInfo.error}` : `Sample data ${DASH} no data source connected yet`;
       el.className = 'source-badge mock';
     }
-  }
-  renderSourceBadge();
-
-  // app.js is loaded up front via a plain <script> tag in index.html (before
-  // this file), not injected at runtime -- that avoided a real class of
-  // script-loading timing bugs. window.renderDashboard is just a function
-  // defined there; call it directly now that data is ready.
-  if (typeof window.renderDashboard === 'function') {
-    window.renderDashboard(data);
-  } else {
-    const banner = document.createElement('div');
-    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#d0393f;color:#fff;padding:14px 20px;font-family:monospace;font-size:12.5px;';
-    banner.textContent = 'Dashboard error (send this to Claude): app.js did not load -- window.renderDashboard is not defined.';
-    document.body.prepend(banner);
   }
 })();
