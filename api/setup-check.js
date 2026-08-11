@@ -1,5 +1,5 @@
 const { google } = require('googleapis');
-const { discoverClickFunnelsPages } = require('../lib/sources');
+const { discoverClickFunnelsPages, googleCredentials } = require('../lib/sources');
 const { CAMPAIGN_PAGE_MAP } = require('../data-sources.config');
 
 // Setup aid for the two integrations that have credentials but aren't
@@ -29,6 +29,10 @@ async function checkClickFunnels() {
       pagesStatus: raw.pagesStatus,
       pageCount: list.length,
       pages: list.slice(0, 100).map(p => ({ id: p.id, name: p.name, path: p.path || p.slug || null })),
+      // Where the campaign landing pages actually live -- the workspace page
+      // list is mostly theme scaffolding.
+      funnelsStatus: raw.funnelsStatus,
+      funnels: raw.funnels,
       rawIfUnrecognised: list.length ? undefined : raw,
     };
   } catch (e) {
@@ -37,27 +41,26 @@ async function checkClickFunnels() {
 }
 
 async function checkSheet() {
-  const { GOOGLE_SHEETS_CLIENT_EMAIL, GOOGLE_SHEETS_PRIVATE_KEY, GOOGLE_SHEET_ID } = process.env;
-  if (!GOOGLE_SHEETS_CLIENT_EMAIL || !GOOGLE_SHEETS_PRIVATE_KEY || !GOOGLE_SHEET_ID) {
+  const { GOOGLE_SHEETS_PRIVATE_KEY, GOOGLE_SHEET_ID } = process.env;
+  if (!GOOGLE_SHEETS_PRIVATE_KEY || !GOOGLE_SHEET_ID) {
     return { configured: false };
   }
   const range = process.env.GOOGLE_SHEET_RANGE || 'Sheet1!A2:F';
-  const key = GOOGLE_SHEETS_PRIVATE_KEY.replace(/\\n/g, '\n');
-  // Shape of the key without revealing it. "Unregistered callers" means the
-  // request carried no credentials, which is what happens when the key never
-  // produced a usable token -- almost always because the env var was pasted
-  // with surrounding quotes or with its newlines flattened.
+  const { email, key } = googleCredentials();
+  // Shape of the key without revealing it, so a credential that was pasted
+  // in the wrong form can be identified from the response alone.
   const keyShape = {
-    length: key.length,
+    rawLooksLikeJson: GOOGLE_SHEETS_PRIVATE_KEY.trim().startsWith('{'),
+    resolvedLength: key.length,
     startsWithHeader: key.startsWith('-----BEGIN'),
     endsWithFooter: key.trimEnd().endsWith('-----'),
     newlineCount: (key.match(/\n/g) || []).length,
-    looksQuoteWrapped: /^["']/.test(GOOGLE_SHEETS_PRIVATE_KEY.trim()),
+    emailResolved: Boolean(email),
   };
 
   try {
     const auth = new google.auth.JWT(
-      GOOGLE_SHEETS_CLIENT_EMAIL, null, key,
+      email, null, key,
       ['https://www.googleapis.com/auth/spreadsheets.readonly']
     );
     // Exchange the JWT for a token explicitly. Left implicit, a credential
@@ -66,7 +69,7 @@ async function checkSheet() {
     try {
       await auth.authorize();
     } catch (authErr) {
-      return { configured: true, keyShape, serviceAccount: GOOGLE_SHEETS_CLIENT_EMAIL, authError: authErr.message };
+      return { configured: true, keyShape, serviceAccount: email, authError: authErr.message };
     }
     const sheets = google.sheets({ version: 'v4', auth });
 
@@ -80,7 +83,7 @@ async function checkSheet() {
     return {
       configured: true,
       keyShape,
-      serviceAccount: GOOGLE_SHEETS_CLIENT_EMAIL,
+      serviceAccount: email,
       spreadsheetTitle: meta.data.properties && meta.data.properties.title,
       tabs,
       rangeUsed: range,
@@ -89,7 +92,7 @@ async function checkSheet() {
       firstRowShape: rows[0] ? rows[0].map(c => (c ? String(c).slice(0, 3) + '...' : '(empty)')) : null,
     };
   } catch (e) {
-    return { configured: true, keyShape, serviceAccount: GOOGLE_SHEETS_CLIENT_EMAIL, rangeUsed: range, error: e.message };
+    return { configured: true, keyShape, serviceAccount: email, rangeUsed: range, error: e.message };
   }
 }
 
