@@ -151,7 +151,17 @@ async function checkMeta() {
   const account = process.env.META_AD_ACCOUNT_ID;
   if (!token || !account) return { configured: false };
 
-  const out = { configured: true, adAccountId: account };
+  // Identifies the token without revealing it, so "the env var was updated"
+  // can be told apart from "the new token is blocked too" -- both look
+  // identical in the error otherwise. Length and a hash change whenever the
+  // value does; neither can be turned back into the token.
+  let h = 5381;
+  for (let i = 0; i < token.length; i++) h = ((h * 33) ^ token.charCodeAt(i)) >>> 0;
+  const out = {
+    configured: true,
+    adAccountId: account,
+    tokenFingerprint: { length: token.length, hash: h.toString(36) },
+  };
 
   // Token identity and scopes. debug_token needs an app token normally, but
   // a token can always inspect itself.
