@@ -65,4 +65,27 @@ module.exports = {
     { utmMedium: 'debt_recycling', campaign: 'Debt Recycling Lead magnet campaign' },
     { utmMedium: 'trust_strategy', campaign: 'Trust Strategy Lead magnet campaign' },
   ],
+
+  // Historic bookings whose utm_campaign holds a hand-written name instead
+  // of the numeric campaign ID. Recovers attribution for periods tagged
+  // before {{campaign.id}} was used, which no amount of future tagging can
+  // fix retroactively.
+  UTM_CAMPAIGN_ALIAS_MAP: [
+    { utmCampaign: 'SMSF Campaign', campaign: 'Campaign SMSF' },
+    { utmCampaign: 'PROS | Property Strategy | Website Leads | Aug 2026 | $3K', campaign: 'PROS | Property Strategy | Website Leads | Aug 2026 | $3K' },
+    // 'master_strategy_session' (21 bookings) is unmapped: it plausibly
+    // belongs to the PD - DNA Strategy Session campaign, but nothing in the
+    // data confirms it, and a wrong alias moves real spend onto the wrong
+    // campaign rather than merely leaving a gap.
+  ],
+
+  // Mediums and sources that are not paid Meta traffic. Bookings from these
+  // have no campaign because there genuinely was not one, which is a very
+  // different thing from a paid booking that lost its tags -- only the
+  // latter is an attribution problem worth chasing.
+  ORGANIC_UTM_VALUES: [
+    'email', 'dr email', 'ts email', 'embed-linktree', 'linktree', 'linktr.ee',
+    'bio', 'messenger', 'facebook messager', 'existing customer', 'refural',
+    'referral', 'youtube', 'organic', 'none',
+  ],
 };

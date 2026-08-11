@@ -178,6 +178,7 @@ module.exports = async (req, res) => {
       utm_campaign: b.utmCampaign,
       utm_medium: b.utmMedium,
       utm_source: b.utmSource,
+      channel: b.channel,
       attended: b.attended,
       attendance_recorded: b.attendanceRecorded,
       updated_at: new Date().toISOString(),

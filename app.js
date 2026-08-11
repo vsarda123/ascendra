@@ -425,16 +425,25 @@ function runDashboard(D) {
     // "0 of 0 bookings" would read as a clean result rather than no data.
     if (allLeads.length === 0) { block.style.display = 'none'; return; }
     block.style.display = '';
-    const unattr = allLeads.filter(l => l.campaign === null).length;
-    if (unattr === 0) { block.style.display = 'none'; return; }
-    const pct = (unattr / allLeads.length) * 100;
-    // These bookings are real and the spend behind them is real, but their
-    // utm_campaign is missing or too vague to name a campaign ("paid" says a
-    // campaign was involved, not which). Per-campaign cost per lead is
-    // therefore an upper bound: the same spend produced these too.
-    block.innerHTML =
-      `<b>${fmtPct(pct)} of bookings unattributed</b> ${DASH} ${unattr} of ${allLeads.length} in range carry no usable campaign in their UTM tags. `
-      + `They are counted in the totals above but cannot be credited to a campaign below, so per-campaign cost per lead reads higher than the truth.`;
+    // Split by how the booking arrived. An organic booking has no campaign
+    // because no ad produced it, which is not a tagging failure -- lumping
+    // the two together makes the tagging look far worse than it is and hides
+    // how much of the pipeline is unpaid.
+    const organic = allLeads.filter(l => l.channel === 'organic').length;
+    const lostTags = allLeads.filter(l => l.channel === 'paid-unattributed' || (l.channel === 'unknown' && !l.campaign)).length;
+    if (organic === 0 && lostTags === 0) { block.style.display = 'none'; return; }
+
+    const parts = [];
+    if (lostTags) {
+      parts.push(`<b>${fmtPct((lostTags / allLeads.length) * 100)} of bookings lost their campaign tags</b> ${DASH} `
+        + `${lostTags} of ${allLeads.length} came from an ad but do not say which. Their spend is counted, they are not, `
+        + `so per-campaign cost per lead reads higher than the truth.`);
+    }
+    if (organic) {
+      parts.push(`${organic} booking${organic === 1 ? '' : 's'} came from unpaid sources (email, Linktree, referral) ${DASH} `
+        + `no campaign because no ad was involved.`);
+    }
+    block.innerHTML = parts.join('<br>');
   }
 
   // ---------------------------------------------------------------- funnel

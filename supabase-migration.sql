@@ -49,3 +49,11 @@ alter table leads add column if not exists utm_source   text;
 -- recorded no-show. The column is blank on all but one booking, so without
 -- this the dashboard would report a ~0% attendance rate as if it were real.
 alter table leads add column if not exists attendance_recorded boolean not null default false;
+
+-- How a booking arrived: 'paid-attributed' (tied to a campaign),
+-- 'organic' (email, linktree, referral -- no campaign because there was no
+-- ad), 'paid-unattributed' (an ad was involved but the tags did not say
+-- which), or 'unknown'. Without this split, organic bookings inflate what
+-- looks like an attribution failure and hide how much of the funnel is
+-- unpaid.
+alter table leads add column if not exists channel text;

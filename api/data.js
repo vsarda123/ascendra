@@ -82,6 +82,7 @@ async function readFromSupabase(since, until) {
     utmSource: l.utm_source || null,
     attended: l.attended,
     attendanceRecorded: l.attendance_recorded || false,
+    channel: l.channel || null,
   }));
 
   // When the sync last wrote, and whether the schema it needs is actually
@@ -235,6 +236,14 @@ module.exports = async (req, res) => {
       bookings: leads.length,
       bookingsAttributed: leads.filter(l => l.campaign).length,
       attendanceRecorded: leads.filter(l => l.attendanceRecorded).length,
+      // Only paidUnattributed is a tagging failure. Organic bookings have no
+      // campaign because no ad produced them, and counting those as missing
+      // attribution overstates the problem badly.
+      byChannel: leads.reduce((acc, l) => {
+        const k = l.channel || 'unknown';
+        acc[k] = (acc[k] || 0) + 1;
+        return acc;
+      }, {}),
     },
     dataSource: usedFallback ? 'live-fallback' : 'supabase',
     generatedAt: new Date().toISOString(),
