@@ -1,5 +1,5 @@
 const { google } = require('googleapis');
-const { discoverClickFunnelsPages, googleCredentials } = require('../lib/sources');
+const { discoverClickFunnelsPages, googleCredentials, fetchMetaAdDestinations } = require('../lib/sources');
 const { CAMPAIGN_PAGE_MAP, SHEET_TAB_CAMPAIGN_MAP } = require('../data-sources.config');
 
 // Setup aid for the two integrations that have credentials but aren't
@@ -139,11 +139,54 @@ async function checkSheet() {
   }
 }
 
+// Matches each campaign's ad destination URL against the funnel pages, so
+// CAMPAIGN_PAGE_MAP can be filled in from evidence rather than by guessing
+// which page a campaign name sounds like it points to.
+function proposeMapping(clickfunnels, destinations) {
+  if (!Array.isArray(destinations) || !clickfunnels || !clickfunnels.funnels) return null;
+
+  const pages = [];
+  for (const f of clickfunnels.funnels) {
+    for (const s of f.steps || []) {
+      if (s.url) pages.push({ funnel: f.name, stepName: s.stepName, pageId: s.pageId, url: s.url.split('?')[0] });
+    }
+  }
+  // Compare on path alone: the same page answers on both the workspace
+  // myclickfunnels.com host and the custom dianahemmad.com.au domain.
+  const pathOf = (u) => { try { return new URL(u).pathname.replace(/\/$/, ''); } catch { return null; } };
+
+  return destinations.map(d => {
+    const matches = [];
+    for (const dest of d.destinations) {
+      const p = pathOf(dest.url);
+      if (!p) continue;
+      for (const page of pages) {
+        if (pathOf(page.url) === p) matches.push({ destination: dest.url, ...page });
+      }
+    }
+    return {
+      campaign: d.campaign,
+      destinations: d.destinations,
+      matchedPages: matches,
+      suggestion: matches.length
+        ? { campaign: d.campaign, clickfunnelsPageId: matches[0].pageId, landingPage: pathOf(matches[0].url) }
+        : null,
+    };
+  });
+}
+
 module.exports = async (req, res) => {
-  const [clickfunnels, sheet] = await Promise.all([checkClickFunnels(), checkSheet()]);
+  const [clickfunnels, sheet, destinations] = await Promise.all([
+    checkClickFunnels(),
+    checkSheet(),
+    fetchMetaAdDestinations().catch(e => ({ error: e.message })),
+  ]);
+
   res.status(200).json({
     clickfunnels,
     sheet,
+    adDestinations: destinations,
+    proposedCampaignPageMap: proposeMapping(clickfunnels, destinations),
     campaignPageMap: { mappings: CAMPAIGN_PAGE_MAP.length, entries: CAMPAIGN_PAGE_MAP },
     checkedAt: new Date().toISOString(),
   });
