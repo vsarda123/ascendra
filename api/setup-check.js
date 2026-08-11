@@ -1,6 +1,6 @@
 const { google } = require('googleapis');
 const { discoverClickFunnelsPages, googleCredentials } = require('../lib/sources');
-const { CAMPAIGN_PAGE_MAP } = require('../data-sources.config');
+const { CAMPAIGN_PAGE_MAP, SHEET_TAB_CAMPAIGN_MAP } = require('../data-sources.config');
 
 // Setup aid for the two integrations that have credentials but aren't
 // producing data yet. ClickFunnels needs page IDs that only exist in the
@@ -84,29 +84,36 @@ async function checkSheet() {
     // a sheet whose tab was renamed rejects the range outright.
     const meta = await sheets.spreadsheets.get({ spreadsheetId: GOOGLE_SHEET_ID });
     const tabs = (meta.data.sheets || []).map(s => s.properties.title);
-    const base = {
+
+    // Mirrors what fetchSheetLeads actually does now -- reads every tab and
+    // locates columns by header -- so this reports the real state of the
+    // connection rather than probing a range nothing uses any more.
+    const perTab = [];
+    for (const tab of tabs) {
+      const tabRange = `'${tab.replace(/'/g, "''")}'!A1:Z`;
+      try {
+        const resp = await sheets.spreadsheets.values.get({ spreadsheetId: GOOGLE_SHEET_ID, range: tabRange });
+        const rows = resp.data.values || [];
+        const headers = (rows[0] || []).map(h => String(h || '').trim());
+        perTab.push({
+          tab,
+          headers,
+          dataRows: Math.max(0, rows.length - 1),
+          mappedToCampaign: (SHEET_TAB_CAMPAIGN_MAP.find(m => m.tab.trim().toLowerCase() === tab.trim().toLowerCase()) || {}).campaign || null,
+        });
+      } catch (tabErr) {
+        perTab.push({ tab, error: tabErr.message });
+      }
+    }
+
+    return {
       configured: true,
       keyShape,
       serviceAccount: email,
       spreadsheetTitle: meta.data.properties && meta.data.properties.title,
-      tabs,
-      rangeUsed: range,
+      tabs: perTab,
+      totalDataRows: perTab.reduce((s, t) => s + (t.dataRows || 0), 0),
     };
-
-    try {
-      const resp = await sheets.spreadsheets.values.get({ spreadsheetId: GOOGLE_SHEET_ID, range });
-      const rows = resp.data.values || [];
-      return {
-        ...base,
-        rowCount: rows.length,
-        columnCounts: [...new Set(rows.slice(0, 50).map(r => r.length))],
-        firstRowShape: rows[0] ? rows[0].map(c => (c ? String(c).slice(0, 3) + '...' : '(empty)')) : null,
-      };
-    } catch (rangeErr) {
-      // Reported alongside the real tab names, which is the thing needed to
-      // correct GOOGLE_SHEET_RANGE.
-      return { ...base, rangeError: rangeErr.message };
-    }
   } catch (e) {
     return { configured: true, keyShape, serviceAccount: email, rangeUsed: range, error: e.message };
   }
