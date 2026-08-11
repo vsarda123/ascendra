@@ -42,12 +42,32 @@ async function checkSheet() {
     return { configured: false };
   }
   const range = process.env.GOOGLE_SHEET_RANGE || 'Sheet1!A2:F';
+  const key = GOOGLE_SHEETS_PRIVATE_KEY.replace(/\\n/g, '\n');
+  // Shape of the key without revealing it. "Unregistered callers" means the
+  // request carried no credentials, which is what happens when the key never
+  // produced a usable token -- almost always because the env var was pasted
+  // with surrounding quotes or with its newlines flattened.
+  const keyShape = {
+    length: key.length,
+    startsWithHeader: key.startsWith('-----BEGIN'),
+    endsWithFooter: key.trimEnd().endsWith('-----'),
+    newlineCount: (key.match(/\n/g) || []).length,
+    looksQuoteWrapped: /^["']/.test(GOOGLE_SHEETS_PRIVATE_KEY.trim()),
+  };
+
   try {
     const auth = new google.auth.JWT(
-      GOOGLE_SHEETS_CLIENT_EMAIL, null,
-      GOOGLE_SHEETS_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      GOOGLE_SHEETS_CLIENT_EMAIL, null, key,
       ['https://www.googleapis.com/auth/spreadsheets.readonly']
     );
+    // Exchange the JWT for a token explicitly. Left implicit, a credential
+    // failure surfaces later as a confusing "unregistered callers" 403 from
+    // the Sheets API instead of the actual auth error.
+    try {
+      await auth.authorize();
+    } catch (authErr) {
+      return { configured: true, keyShape, serviceAccount: GOOGLE_SHEETS_CLIENT_EMAIL, authError: authErr.message };
+    }
     const sheets = google.sheets({ version: 'v4', auth });
 
     // Tab names are the usual culprit: the default range says 'Sheet1', and
@@ -59,6 +79,7 @@ async function checkSheet() {
     const rows = resp.data.values || [];
     return {
       configured: true,
+      keyShape,
       serviceAccount: GOOGLE_SHEETS_CLIENT_EMAIL,
       spreadsheetTitle: meta.data.properties && meta.data.properties.title,
       tabs,
@@ -68,7 +89,7 @@ async function checkSheet() {
       firstRowShape: rows[0] ? rows[0].map(c => (c ? String(c).slice(0, 3) + '...' : '(empty)')) : null,
     };
   } catch (e) {
-    return { configured: true, rangeUsed: range, error: e.message };
+    return { configured: true, keyShape, serviceAccount: GOOGLE_SHEETS_CLIENT_EMAIL, rangeUsed: range, error: e.message };
   }
 }
 
