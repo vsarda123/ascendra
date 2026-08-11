@@ -13,7 +13,17 @@ module.exports = {
   // Page IDs come from GET /api/setup-check, which lists every funnel step
   // and its page ID, or from Settings -> that page -> the ID in the URL.
   CAMPAIGN_PAGE_MAP: [
-    // { campaign: 'Debt Recycling Lead magnet campaign', clickfunnelsPageId: 12345, landingPage: '/debt-recycling' },
+    // Landing step of the "Lead Magnet - Debt Recycling for Property
+    // Investors" funnel, served publicly at dianahemmad.com.au/debt-recycling.
+    { campaign: 'Debt Recycling Lead magnet campaign', clickfunnelsPageId: 23710323, landingPage: '/debt-recycling' },
+
+    // Landing step of "Leadmagnet - Strategic Lending Framework Property
+    // Investment strategy" (page 23693120). Which Meta campaign drives it
+    // is still unconfirmed -- "Trust Strategy Lead magnet campaign" and
+    // "Campaign SMSF" are both plausible from their names alone, and
+    // crediting page views to the wrong campaign is worse than leaving the
+    // row blank. Fill in once the ad's destination is known.
+    // { campaign: '...', clickfunnelsPageId: 23693120, landingPage: '/strategic-lending-framework' },
   ],
 
   // Opt-in workbook tab -> the Meta campaign that paid for those opt-ins.
