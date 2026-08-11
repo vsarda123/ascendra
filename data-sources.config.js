@@ -39,9 +39,12 @@ module.exports = {
   // trailing space in "Debt recycling " does not matter here.
   SHEET_TAB_CAMPAIGN_MAP: [
     { tab: 'Debt recycling', campaign: 'Debt Recycling Lead magnet campaign', landingPage: '/debt-recycling' },
-    // The Meta campaign for this one still needs confirming -- leave it
-    // unmapped rather than guessing, so its leads stay honestly
-    // unattributed instead of being credited to the wrong campaign.
-    // { tab: 'Property investing strategy', campaign: '...', landingPage: '/property-investing-strategy' },
+
+    // Its own lead magnet, served by ClickFunnels page 23693120 (confirmed
+    // by comparing the live page's assets against every candidate). campaign
+    // is null on purpose: no Meta campaign currently drives this page, so
+    // these downloads are real but unpaid, and attributing them to a
+    // campaign would invent spend behind them.
+    { tab: 'Property investing strategy', campaign: null, landingPage: '/property-investment-strategy' },
   ],
 };
