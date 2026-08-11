@@ -141,6 +141,56 @@ async function checkSheet() {
   }
 }
 
+// Why Meta is refusing us. The three plausible causes -- an expired token,
+// a restricted app, a disabled ad account -- need completely different
+// fixes, and the insights call's error alone does not tell them apart.
+// Asks Meta about the token and the account separately so the failure is
+// pinned to one of them.
+async function checkMeta() {
+  const token = process.env.META_ACCESS_TOKEN;
+  const account = process.env.META_AD_ACCOUNT_ID;
+  if (!token || !account) return { configured: false };
+
+  const out = { configured: true, adAccountId: account };
+
+  // Token identity and scopes. debug_token needs an app token normally, but
+  // a token can always inspect itself.
+  try {
+    const r = await fetch(`https://graph.facebook.com/v21.0/me/permissions?access_token=${token}`);
+    const j = await r.json();
+    out.permissions = j.error
+      ? { error: j.error.message, code: j.error.code, subcode: j.error.error_subcode }
+      : (j.data || []).filter(p => p.status === 'granted').map(p => p.permission);
+  } catch (e) {
+    out.permissions = { error: e.message };
+  }
+
+  // Ad account status. account_status 1 is active; 2 is disabled, 3 is
+  // unsettled, 7 is pending review, 9 is in grace period.
+  try {
+    const r = await fetch(`https://graph.facebook.com/v21.0/${account}?fields=name,account_status,disable_reason,currency&access_token=${token}`);
+    const j = await r.json();
+    out.account = j.error
+      ? { error: j.error.message, code: j.error.code, subcode: j.error.error_subcode, type: j.error.type }
+      : j;
+  } catch (e) {
+    out.account = { error: e.message };
+  }
+
+  // The exact call the sync makes, kept to a single day so it fails fast.
+  try {
+    const r = await fetch(`https://graph.facebook.com/v21.0/${account}/insights?fields=spend&date_preset=yesterday&access_token=${token}`);
+    const j = await r.json();
+    out.insights = j.error
+      ? { error: j.error.message, code: j.error.code, subcode: j.error.error_subcode, type: j.error.type, fbtrace_id: j.error.fbtrace_id }
+      : { ok: true, rows: (j.data || []).length };
+  } catch (e) {
+    out.insights = { error: e.message };
+  }
+
+  return out;
+}
+
 // The booking ledger is a different sheet from the opt-in workbook: it
 // records who actually booked a meeting, which is the qualified lead that
 // cost per lead should be measured against. Reports its shape, plus the
@@ -242,10 +292,11 @@ function findByPath(clickfunnels, wanted) {
 }
 
 module.exports = async (req, res) => {
-  const [clickfunnels, sheet, bookings, destinations] = await Promise.all([
+  const [clickfunnels, sheet, bookings, meta, destinations] = await Promise.all([
     checkClickFunnels(),
     checkSheet(),
     checkBookingsSheet(),
+    checkMeta(),
     fetchMetaAdDestinations().catch(e => ({ error: e.message })),
   ]);
 
@@ -253,6 +304,7 @@ module.exports = async (req, res) => {
     clickfunnels,
     sheet,
     bookings,
+    meta,
     adDestinations: destinations,
     pathLookup: req.query && req.query.path
       ? { path: req.query.path, matches: findByPath(clickfunnels, req.query.path) }
