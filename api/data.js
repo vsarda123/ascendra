@@ -84,12 +84,25 @@ async function readFromSupabase(since, until) {
     attendanceRecorded: l.attendance_recorded || false,
   }));
 
+  // When the sync last wrote, and whether the schema it needs is actually
+  // there. Every metric reading zero has the same two possible causes -- the
+  // migration was not run, or the sync has not run since -- and neither is
+  // visible from the dashboard without this.
+  const newest = (spendData || []).reduce((max, r) => (r.updated_at > max ? r.updated_at : max), '');
+  const sample = (spendData || [])[0] || {};
+  const sampleLead = (leadsData || [])[0] || {};
+
   // Bookings are the qualified leads; opt-ins are guide downloads and a
   // separate, earlier funnel stage.
   return {
     dailySpend,
     leads: mapped.filter(l => l.kind === 'booking'),
     optins: mapped.filter(l => l.kind === 'optin'),
+    freshness: {
+      lastSyncedAt: newest || null,
+      spendHasMetricColumns: Object.prototype.hasOwnProperty.call(sample, 'impressions'),
+      leadsHaveKindColumn: Object.prototype.hasOwnProperty.call(sampleLead, 'kind'),
+    },
   };
 }
 
@@ -152,6 +165,7 @@ module.exports = async (req, res) => {
   let dailySpend = [];
   let leads = [];
   let optins = [];
+  let freshness = null;
   let sources = { meta: false, clickfunnels: false, sheets: false, bookings: false };
   let errors = {};
   let usedFallback = false;
@@ -162,6 +176,7 @@ module.exports = async (req, res) => {
       dailySpend = fromSupabase.dailySpend;
       leads = fromSupabase.leads;
       optins = fromSupabase.optins;
+      freshness = fromSupabase.freshness;
       sources = {
         meta: dailySpend.length > 0,
         clickfunnels: dailySpend.some(r => r.landingPageViews > 0),
@@ -212,7 +227,7 @@ module.exports = async (req, res) => {
   };
 
   res.status(200).json({
-    sources, errors, config, since, until, dailySpend, leads, optins,
+    sources, errors, config, freshness, since, until, dailySpend, leads, optins,
     // How much of the booking ledger can be tied to a campaign at all. A
     // cost per lead computed over attributed bookings alone is only as
     // trustworthy as this share.

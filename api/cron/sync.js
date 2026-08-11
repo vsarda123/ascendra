@@ -13,8 +13,13 @@ module.exports = async (req, res) => {
   // Vercel Cron sends this header automatically when CRON_SECRET is set as
   // an env var; without this check anyone could hit this URL and burn
   // through Meta's rate limit.
+  // Vercel Cron sends the secret as a Bearer header. The same secret is also
+  // accepted as ?key= so the job can be run on demand from a browser --
+  // there is otherwise no way to force a refresh without waiting for the
+  // schedule, and a schema change leaves the dashboard wrong until then.
   const authHeader = req.headers['authorization'];
-  if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  const provided = authHeader === `Bearer ${process.env.CRON_SECRET}` || req.query.key === process.env.CRON_SECRET;
+  if (process.env.CRON_SECRET && !provided) {
     res.status(401).json({ error: 'unauthorized' });
     return;
   }
