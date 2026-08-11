@@ -95,10 +95,30 @@ async function checkSheet() {
         const resp = await sheets.spreadsheets.values.get({ spreadsheetId: GOOGLE_SHEET_ID, range: tabRange });
         const rows = resp.data.values || [];
         const headers = (rows[0] || []).map(h => String(h || '').trim());
+
+        // Distinct values of the landing page column, with counts. This is
+        // the only field tying an opt-in to the page that produced it, so it
+        // is what lets a ClickFunnels page ID be matched to a campaign. Page
+        // names are not personal data; no other column's values are read.
+        const iLanding = headers.findIndex(h => h.toLowerCase().includes('landing'));
+        let landingPages = null;
+        if (iLanding !== -1) {
+          const counts = {};
+          for (const r of rows.slice(1)) {
+            const v = (r[iLanding] || '').toString().trim();
+            if (v) counts[v] = (counts[v] || 0) + 1;
+          }
+          landingPages = Object.entries(counts)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 25)
+            .map(([value, count]) => ({ value, count }));
+        }
+
         perTab.push({
           tab,
           headers,
           dataRows: Math.max(0, rows.length - 1),
+          landingPages,
           mappedToCampaign: (SHEET_TAB_CAMPAIGN_MAP.find(m => m.tab.trim().toLowerCase() === tab.trim().toLowerCase()) || {}).campaign || null,
         });
       } catch (tabErr) {
