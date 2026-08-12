@@ -1,7 +1,8 @@
 const { getSupabase } = require('../../lib/supabase');
 const {
   isoDate, addDays, withTimeout,
-  fetchMetaInsights, fetchClickFunnelsWeekly, fetchSheetLeads, fetchBookings, discoverClickFunnelsPages,
+  fetchMetaInsights, fetchClickFunnelsWeekly, fetchSheetLeads,
+  fetchBookings, resolveBookingAttribution, discoverClickFunnelsPages,
   mergeDailySpend,
 } = require('../../lib/sources');
 
@@ -40,6 +41,7 @@ module.exports = async (req, res) => {
   let metaRows = [];
   let cfByCampaign = {};
   let leads = [];
+  let bookings = [];
 
   const SOURCE_TIMEOUT_MS = 45000;
   const tasks = [];
@@ -68,25 +70,30 @@ module.exports = async (req, res) => {
     );
   }
 
+  // Bookings run alongside Meta/ClickFunnels/Sheets, not after them. This
+  // used to await the Meta fetch first, purely to resolve utm_campaign (a
+  // numeric Meta campaign id) to a name -- but that resolution is a cheap,
+  // in-memory lookup (resolveBookingAttribution, below), while the fetch
+  // itself is its own multi-second Sheets API round trip. Stacking that
+  // sequentially after Meta, once Meta stopped failing in under a second and
+  // started taking real time to answer, pushed the function past its time
+  // limit and every source -- including the ones that had already
+  // succeeded -- came back empty because nothing had been written yet.
+  if (process.env.GOOGLE_BOOKINGS_SHEET_ID && process.env.GOOGLE_SHEETS_PRIVATE_KEY) {
+    tasks.push(
+      withTimeout(fetchBookings(), SOURCE_TIMEOUT_MS, 'Bookings sheet')
+        .then((rows) => { bookings = rows; sources.bookings = true; })
+        .catch((e) => { errors.bookings = e.message; })
+    );
+  }
+
   await Promise.allSettled(tasks);
 
-  // Bookings are fetched after Meta, not alongside it: their utm_campaign
-  // holds a numeric Meta campaign ID, and turning that into a campaign name
-  // needs the insights rows to have arrived first.
   const campaignIdToName = {};
   for (const r of metaRows) {
     if (r.campaignId) campaignIdToName[r.campaignId] = r.campaign;
   }
-
-  let bookings = [];
-  if (process.env.GOOGLE_BOOKINGS_SHEET_ID && process.env.GOOGLE_SHEETS_PRIVATE_KEY) {
-    try {
-      bookings = await withTimeout(fetchBookings(campaignIdToName), SOURCE_TIMEOUT_MS, 'Bookings sheet');
-      sources.bookings = true;
-    } catch (e) {
-      errors.bookings = e.message;
-    }
-  }
+  bookings = resolveBookingAttribution(bookings, campaignIdToName);
 
   const dailySpend = mergeDailySpend(metaRows, cfByCampaign);
 
