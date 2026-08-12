@@ -511,34 +511,51 @@ function runDashboard(D) {
     }).join('');
   }
 
+  // A hover-only tooltip is easy to miss (slow native rendering, and does
+  // not exist at all on touch) and was not good enough on its own. When
+  // there are few enough bars/points to fit without overlapping, print the
+  // value directly on the chart; the <title> tooltip stays as a fallback
+  // for the dense daily case where nothing could be printed legibly.
+  const MAX_PRINTED_VALUES = 18;
+
   // dates/tooltips are parallel to values: dates drives the x-axis labels,
-  // tooltips is what a native <title> shows on hover -- no chart library, so
-  // this is the cheapest way to let someone check one bar's exact number
-  // instead of eyeballing its height against the legend's min-max range.
-  function svgBars(values, { width = 320, height = 100, color, dates = [], tooltips = [] }) {
+  // tooltips is the full hover text. valueFmt renders the short on-chart
+  // label ("$245") when the bucket count is low enough to print one per bar.
+  function svgBars(values, { width = 320, height = 100, color, dates = [], tooltips = [], valueFmt }) {
     const plotH = height - 2;
-    const max = Math.max(...values, 1);
     const n = values.length;
+    const printValues = valueFmt && n <= MAX_PRINTED_VALUES;
+    const topMargin = printValues ? 20 : 12; // extra headroom for the label above the tallest bar
+    const max = Math.max(...values, 1);
     const gap = n > 20 ? 1.5 : 6;
     const barW = (width - gap * (n - 1)) / n;
     const bars = values.map((v, i) => {
-      const h = (v / max) * (plotH - 12);
+      const h = (v / max) * (plotH - topMargin);
       const x = i * (barW + gap);
       const y = plotH - h - 2;
+      const cx = x + barW / 2;
       const title = tooltips[i] ? `<title>${escapeHtml(tooltips[i])}</title>` : '';
-      return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(barW, 0.5).toFixed(1)}" height="${h.toFixed(1)}" rx="${barW > 4 ? 2 : 0}" fill="${color}">${title}</rect>`;
+      const rect = `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(barW, 0.5).toFixed(1)}" height="${h.toFixed(1)}" rx="${barW > 4 ? 2 : 0}" fill="${color}">${title}</rect>`;
+      const label = printValues
+        ? `<text x="${cx.toFixed(1)}" y="${(y - 3).toFixed(1)}" font-size="8" fill="var(--ink-2)" text-anchor="middle">${escapeHtml(valueFmt(v))}</text>`
+        : '';
+      return rect + label;
     }).join('');
     const axis = dates.length ? axisLabels(dates, width) : '';
     return `<svg viewBox="0 0 ${width} ${height + AXIS_H}" role="img">${bars}<line x1="0" y1="${plotH - 1}" x2="${width}" y2="${plotH - 1}" stroke="var(--hairline)" stroke-width="1"/><g transform="translate(0,${plotH})">${axis}</g></svg>`;
   }
 
-  function svgLines(series, { width = 320, height = 100, dates = [] }) {
+  function svgLines(series, { width = 320, height = 100, dates = [], valueFmt }) {
     const plotH = height - 2;
     const allVals = series.flatMap(s => s.values);
     const max = Math.max(...allVals, 1);
     const n = series[0].values.length;
+    const printValues = valueFmt && n <= MAX_PRINTED_VALUES;
+    // Extra top and bottom margin so a printed label has room whether the
+    // point it belongs to sits near the top or bottom of the plot.
+    const topPad = printValues ? 12 : 4;
     const stepX = width / Math.max(1, n - 1);
-    const scaleY = (v) => (plotH - 14) - (v / max) * (plotH - 20) + 4;
+    const scaleY = (v) => (plotH - 14) - (v / max) * (plotH - 20 - (printValues ? 8 : 0)) + topPad;
 
     const parts = series.map(s => {
       const solidIdx = s.dashedFrom != null ? s.dashedFrom : n;
@@ -557,6 +574,13 @@ function runDashboard(D) {
         const cy = scaleY(v).toFixed(1);
         const title = dates[i] ? `<title>${escapeHtml(fmtAxisDate(dates[i]))}: ${escapeHtml(String(s.tooltips ? s.tooltips[i] : v))}</title>` : '';
         out += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${s.color}">${title}</circle>`;
+        if (printValues) {
+          // Alternate above/below the point -- consecutive labels sitting
+          // directly on top of each other is the more likely collision than
+          // one from two points apart, since points are evenly spaced.
+          const dy = i % 2 === 0 ? -5 : 11;
+          out += `<text x="${cx}" y="${(scaleY(v) + dy).toFixed(1)}" font-size="8" fill="var(--ink-2)" text-anchor="middle">${escapeHtml(valueFmt(v))}</text>`;
+        }
       });
       return out;
     }).join('');
@@ -590,18 +614,24 @@ function runDashboard(D) {
 
   function renderTrend() {
     const buckets = bucketRange(state.from, state.to);
-    const weekly = buckets.length > 31;
+    // bucketRange's own threshold, not the resulting bucket count -- a
+    // 90-day range collapses to ~13 weekly buckets, which is nowhere near
+    // 31, so checking buckets.length here previously mislabelled genuinely
+    // weekly bars as "per day".
+    const weekly = daysCount(state.from, state.to) > 31;
     // The date shown on hover/axis for a weekly bucket is its first day --
     // consistent with how the legend already describes weekly buckets ("per
     // week") rather than implying the bucket is a single day.
     const dates = buckets.map(b => b.start);
     const bucketLabel = (b) => weekly ? `Week of ${fmtDate(b.start)}` : fmtDate(b.start);
+    const fmtMoneyShort = (n) => n >= 1000 ? '$' + (n / 1000).toFixed(1) + 'k' : fmtMoney(n);
 
     const spendByBucket = buckets.map(b => spendFor(b.start, b.end).reduce((s, r) => s + r.spend, 0));
     document.getElementById('trend-spend').innerHTML = svgBars(spendByBucket, {
       color: 'var(--cat-1)',
       dates,
       tooltips: buckets.map((b, i) => `${bucketLabel(b)}: ${fmtMoney(spendByBucket[i])}`),
+      valueFmt: fmtMoneyShort,
     });
     document.getElementById('trend-spend-legend').textContent =
       `Spend ($${Math.min(...spendByBucket).toLocaleString()}${DASH_EN}$${Math.max(...spendByBucket).toLocaleString()} per ${weekly ? 'week' : 'day'})`;
@@ -622,7 +652,7 @@ function runDashboard(D) {
         dashedFrom: null,
         tooltips: cpcByBucket.map(v => v ? '$' + v.toFixed(2) : 'no link clicks'),
       }],
-      { dates }
+      { dates, valueFmt: (v) => v ? '$' + v.toFixed(2) : DASH }
     );
     const priced = cpcByBucket.filter(v => v > 0);
     document.getElementById('trend-cpc-legend').textContent = priced.length
