@@ -485,26 +485,60 @@ function runDashboard(D) {
   }
 
   // ----------------------------------------------------------------- trend
-  function svgBars(values, { width = 320, height = 100, color }) {
+  // Compact axis label -- "5 Aug", no year, so it fits stacked under 90
+  // daily bars without wrapping or overlapping its neighbours.
+  const fmtAxisDate = (iso) => new Date(iso + 'T00:00:00Z').toLocaleDateString('en-AU', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+
+  // Evenly-spaced tick indices, always including the first and last bucket,
+  // capped at maxTicks so 90 daily bars don't render 90 overlapping labels.
+  function axisTickIndexes(n, maxTicks = 6) {
+    if (n <= maxTicks) return Array.from({ length: n }, (_, i) => i);
+    const step = (n - 1) / (maxTicks - 1);
+    const idx = new Set();
+    for (let i = 0; i < maxTicks; i++) idx.add(Math.round(i * step));
+    return [...idx].sort((a, b) => a - b);
+  }
+
+  const AXIS_H = 16; // reserved strip below the plot for date labels
+
+  function axisLabels(dates, plotWidth) {
+    const n = dates.length;
+    const stepX = plotWidth / Math.max(1, n - 1);
+    return axisTickIndexes(n).map(i => {
+      const x = n === 1 ? plotWidth / 2 : i * stepX;
+      const anchor = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
+      return `<text x="${x.toFixed(1)}" y="${AXIS_H - 4}" font-size="8" fill="var(--ink-3)" text-anchor="${anchor}">${escapeHtml(fmtAxisDate(dates[i]))}</text>`;
+    }).join('');
+  }
+
+  // dates/tooltips are parallel to values: dates drives the x-axis labels,
+  // tooltips is what a native <title> shows on hover -- no chart library, so
+  // this is the cheapest way to let someone check one bar's exact number
+  // instead of eyeballing its height against the legend's min-max range.
+  function svgBars(values, { width = 320, height = 100, color, dates = [], tooltips = [] }) {
+    const plotH = height - 2;
     const max = Math.max(...values, 1);
     const n = values.length;
     const gap = n > 20 ? 1.5 : 6;
     const barW = (width - gap * (n - 1)) / n;
     const bars = values.map((v, i) => {
-      const h = (v / max) * (height - 12);
+      const h = (v / max) * (plotH - 12);
       const x = i * (barW + gap);
-      const y = height - h - 2;
-      return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(barW, 0.5).toFixed(1)}" height="${h.toFixed(1)}" rx="${barW > 4 ? 2 : 0}" fill="${color}"/>`;
+      const y = plotH - h - 2;
+      const title = tooltips[i] ? `<title>${escapeHtml(tooltips[i])}</title>` : '';
+      return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(barW, 0.5).toFixed(1)}" height="${h.toFixed(1)}" rx="${barW > 4 ? 2 : 0}" fill="${color}">${title}</rect>`;
     }).join('');
-    return `<svg viewBox="0 0 ${width} ${height}" role="img">${bars}<line x1="0" y1="${height - 1}" x2="${width}" y2="${height - 1}" stroke="var(--hairline)" stroke-width="1"/></svg>`;
+    const axis = dates.length ? axisLabels(dates, width) : '';
+    return `<svg viewBox="0 0 ${width} ${height + AXIS_H}" role="img">${bars}<line x1="0" y1="${plotH - 1}" x2="${width}" y2="${plotH - 1}" stroke="var(--hairline)" stroke-width="1"/><g transform="translate(0,${plotH})">${axis}</g></svg>`;
   }
 
-  function svgLines(series, { width = 320, height = 100 }) {
+  function svgLines(series, { width = 320, height = 100, dates = [] }) {
+    const plotH = height - 2;
     const allVals = series.flatMap(s => s.values);
     const max = Math.max(...allVals, 1);
     const n = series[0].values.length;
     const stepX = width / Math.max(1, n - 1);
-    const scaleY = (v) => (height - 14) - (v / max) * (height - 20) + 4;
+    const scaleY = (v) => (plotH - 14) - (v / max) * (plotH - 20) + 4;
 
     const parts = series.map(s => {
       const solidIdx = s.dashedFrom != null ? s.dashedFrom : n;
@@ -514,12 +548,20 @@ function runDashboard(D) {
       let out = '';
       if (solid) out += `<polyline points="${solid}" fill="none" stroke="${s.color}" stroke-width="2"/>`;
       if (dashed && s.dashedFrom != null) out += `<polyline points="${dashed}" fill="none" stroke="${s.color}" stroke-width="2" stroke-dasharray="3,3" opacity="0.55"/>`;
-      const lastX = ((n - 1) * stepX).toFixed(1);
-      const lastY = scaleY(s.values[n - 1]).toFixed(1);
-      out += `<circle cx="${lastX}" cy="${lastY}" r="3" fill="${s.color}"/>`;
+      // A marker on every point, not just the last -- with n up around 90
+      // for a daily-bucketed range these are necessarily small, but a dot
+      // to hover for the exact value beats a bare line with one endpoint.
+      const r = n > 40 ? 1.5 : n > 14 ? 2 : 3;
+      s.values.forEach((v, i) => {
+        const cx = (i * stepX).toFixed(1);
+        const cy = scaleY(v).toFixed(1);
+        const title = dates[i] ? `<title>${escapeHtml(fmtAxisDate(dates[i]))}: ${escapeHtml(String(s.tooltips ? s.tooltips[i] : v))}</title>` : '';
+        out += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${s.color}">${title}</circle>`;
+      });
       return out;
     }).join('');
-    return `<svg viewBox="0 0 ${width} ${height}" role="img">${parts}<line x1="0" y1="${height - 1}" x2="${width}" y2="${height - 1}" stroke="var(--hairline)" stroke-width="1"/></svg>`;
+    const axis = dates.length ? axisLabels(dates, width) : '';
+    return `<svg viewBox="0 0 ${width} ${height + AXIS_H}" role="img">${parts}<line x1="0" y1="${plotH - 1}" x2="${width}" y2="${plotH - 1}" stroke="var(--hairline)" stroke-width="1"/><g transform="translate(0,${plotH})">${axis}</g></svg>`;
   }
 
   // Buckets the selected range for the trend charts -- daily if the range
@@ -548,11 +590,21 @@ function runDashboard(D) {
 
   function renderTrend() {
     const buckets = bucketRange(state.from, state.to);
+    const weekly = buckets.length > 31;
+    // The date shown on hover/axis for a weekly bucket is its first day --
+    // consistent with how the legend already describes weekly buckets ("per
+    // week") rather than implying the bucket is a single day.
+    const dates = buckets.map(b => b.start);
+    const bucketLabel = (b) => weekly ? `Week of ${fmtDate(b.start)}` : fmtDate(b.start);
 
     const spendByBucket = buckets.map(b => spendFor(b.start, b.end).reduce((s, r) => s + r.spend, 0));
-    document.getElementById('trend-spend').innerHTML = svgBars(spendByBucket, { color: 'var(--cat-1)' });
+    document.getElementById('trend-spend').innerHTML = svgBars(spendByBucket, {
+      color: 'var(--cat-1)',
+      dates,
+      tooltips: buckets.map((b, i) => `${bucketLabel(b)}: ${fmtMoney(spendByBucket[i])}`),
+    });
     document.getElementById('trend-spend-legend').textContent =
-      `Spend ($${Math.min(...spendByBucket).toLocaleString()}${DASH_EN}$${Math.max(...spendByBucket).toLocaleString()} per ${buckets.length > 31 ? 'week' : 'day'})`;
+      `Spend ($${Math.min(...spendByBucket).toLocaleString()}${DASH_EN}$${Math.max(...spendByBucket).toLocaleString()} per ${weekly ? 'week' : 'day'})`;
 
     // Cost per link click, bucket by bucket. Spend alone says how much went
     // out; this says whether each dollar is buying more or fewer people, and
@@ -564,7 +616,13 @@ function runDashboard(D) {
       return c ? s / c : 0;
     });
     document.getElementById('trend-funnel').innerHTML = svgLines(
-      [{ values: cpcByBucket, color: 'var(--cat-2)', dashedFrom: null }], {}
+      [{
+        values: cpcByBucket,
+        color: 'var(--cat-2)',
+        dashedFrom: null,
+        tooltips: cpcByBucket.map(v => v ? '$' + v.toFixed(2) : 'no link clicks'),
+      }],
+      { dates }
     );
     const priced = cpcByBucket.filter(v => v > 0);
     document.getElementById('trend-cpc-legend').textContent = priced.length
