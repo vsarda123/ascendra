@@ -25,46 +25,6 @@ function runDashboard(D) {
   const OPTINS = D.OPTINS || [];
   const ATTRIBUTION = D.ATTRIBUTION || null;
 
-  // TEMP diagnostic -- always-visible, no DevTools needed. Shows exactly
-  // what reached the renderer: which data path was used (live/mock,
-  // supabase/live-fallback, per-source errors), row counts, real sample
-  // values for campaign/audience/creative/landingPage, and how long each
-  // stage actually took -- so "the page freezes" stops being a guess between
-  // "still waiting on something async" (page stays interactive) and "a
-  // synchronous computation is blocking the tab" (page stops responding to
-  // clicks/scroll too), and becomes a measured number instead.
-  let diagPanelEl = null;
-  try {
-    const uniq = (arr) => [...new Set(arr.filter(v => v != null))];
-    const campaigns = uniq(DAILY_SPEND.map(r => r.campaign));
-    const audiences = uniq(DAILY_SPEND.map(r => r.audience));
-    const creatives = uniq(DAILY_SPEND.map(r => r.creative));
-    const landingPages = uniq(DAILY_SPEND.map(r => r.landingPage));
-    const info = window.DASHBOARD_SOURCE_INFO || {};
-    // runDashboard runs twice by design (mock first, live once it arrives),
-    // so replace any previous panel rather than stacking a second one.
-    const prev = document.getElementById('diag-panel');
-    if (prev) prev.remove();
-    const panel = document.createElement('div');
-    panel.id = 'diag-panel';
-    panel.style.cssText = 'background:#0B0E1F;color:#00E88F;padding:10px 16px;font-family:ui-monospace,Consolas,monospace;font-size:11px;white-space:pre-wrap;border-bottom:3px solid #7B00FF;position:relative;z-index:99998;';
-    panel.textContent =
-      'DIAG (send this to Claude)\n' +
-      'mode=' + info.mode + '  dataSource=' + info.dataSource + '  sources=' + JSON.stringify(info.sources) + '\n' +
-      'placeholders=' + JSON.stringify(info.placeholders) + '  timings=' + JSON.stringify(info.timings) + '\n' +
-      'errors=' + JSON.stringify(info.errors) + (info.error ? '  topError=' + info.error : '') + '\n' +
-      'DAILY_SPEND.length=' + DAILY_SPEND.length + '  LEADS.length=' + LEADS.length + '\n' +
-      'campaigns(' + campaigns.length + ')=' + JSON.stringify(campaigns.slice(0, 3)) + '\n' +
-      'audiences(' + audiences.length + ')=' + JSON.stringify(audiences.slice(0, 3)) + '\n' +
-      'creatives(' + creatives.length + ')=' + JSON.stringify(creatives.slice(0, 3)) + '\n' +
-      'landingPages(' + landingPages.length + ')=' + JSON.stringify(landingPages.slice(0, 3)) + '\n' +
-      'sampleRow=' + JSON.stringify(DAILY_SPEND[0] || null);
-    document.body.prepend(panel);
-    diagPanelEl = panel;
-  } catch (err) {
-    showFatalError(err);
-  }
-
   const state = { preset: 'last90', from: null, to: null, campaign: 'all', audience: 'all', creative: 'all', landingPage: 'all' };
   // Highest spend first: with no settlement data to rank on, the money going
   // out is the thing worth looking at from the top of the table down.
@@ -712,8 +672,5 @@ function runDashboard(D) {
 
   try { initFilterBar(); } catch (err) { showFatalError(err); }
   try { initTableSort(); } catch (err) { showFatalError(err); }
-  const renderStart = performance.now();
   renderAll();
-  const renderMs = Math.round(performance.now() - renderStart);
-  if (diagPanelEl) diagPanelEl.textContent += '\nrenderAll() took ' + renderMs + 'ms (synchronous -- anything here over ~200ms would visibly stall the tab)';
 }

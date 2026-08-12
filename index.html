@@ -10,31 +10,6 @@
 </head>
 <body>
 
-<!--
-  Boot trace. Every earlier round of this bug came down to not knowing which
-  line the page died on -- the console was never available. This records the
-  load sequence and any error straight onto the page, so a screenshot alone
-  says where it stopped. Runs before every other script so it can catch an
-  error thrown while those are still parsing.
--->
-<pre id="boot-trace" style="margin:0;padding:8px 16px;background:#0B0E1F;color:#00E88F;font:11px ui-monospace,Consolas,monospace;white-space:pre-wrap;border-bottom:3px solid #7B00FF">boot: inline script has not run yet</pre>
-<script>
-window.__BOOT = [];
-window.bootLog = function (msg) {
-  window.__BOOT.push(new Date().toISOString().slice(11, 23) + '  ' + msg);
-  var el = document.getElementById('boot-trace');
-  if (el) el.textContent = window.__BOOT.join('\n');
-};
-window.addEventListener('error', function (e) {
-  window.bootLog('*** JS ERROR: ' + e.message + '  @ ' + e.filename + ':' + e.lineno + ':' + e.colno);
-});
-window.addEventListener('unhandledrejection', function (e) {
-  var r = e.reason;
-  window.bootLog('*** UNHANDLED REJECTION: ' + (r && r.stack ? r.stack : (r && r.message ? r.message : String(r))));
-});
-window.bootLog('inline boot script ran');
-</script>
-
 <header class="brandbar">
   <div class="brandbar-inner">
     <div class="wordmark"><b>Ascendra</b><span>Financial</span></div>
@@ -145,10 +120,8 @@ window.bootLog('inline boot script ran');
   Ascendra Financial &middot; internal reporting prototype. Pulls live data from Meta, ClickFunnels, and the Sheet ledger via <code>/api/data</code> when configured; falls back to sample data otherwise (see the badge above).
 </footer>
 
-<script src="app.js?v=2026081107"></script>
-<script>window.bootLog('app.js tag done, renderDashboard=' + typeof window.renderDashboard);</script>
-<script src="data.js?v=2026081107"></script>
-<script>window.bootLog('data.js tag done (its own async work may still be running)');</script>
+<script src="app.js?v=2026081200"></script>
+<script src="data.js?v=2026081200"></script>
 <script>
   fetch('/api/auth/me').then(r => r.json()).then(d => {
     const el = document.getElementById('whoami');
