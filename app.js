@@ -271,6 +271,16 @@ function runDashboard(D) {
       .reduce((s, r) => s + r.spend, 0);
     const bookingsMTD = LEADS.filter(l => l.generatedDate >= monthStart && l.generatedDate <= TODAY).length;
 
+    const spendDailyPace = daysElapsed ? spendMTD / daysElapsed : 0;
+    const bookingsDailyPace = daysElapsed ? bookingsMTD / daysElapsed : 0;
+
+    // The ceiling on daily spend for the days that remain, given what is
+    // already gone and a fixed monthly cap. This is arithmetic, not a
+    // forecast: it is the number to check before raising a daily budget,
+    // which is why it reads as a rate and not a total.
+    const budgetLeft = MONTHLY_GOALS.spendBudget - spendMTD;
+    const sustainableDaily = daysLeft > 0 ? budgetLeft / daysLeft : null;
+
     // higherIsBetter: spend wants to land AT or UNDER goal; bookings want to
     // land AT or OVER goal. Same math, opposite "good" direction.
     function paceCard(label, actual, goal, fmt, higherIsBetter) {
@@ -295,9 +305,65 @@ function runDashboard(D) {
         </div>`;
     }
 
+    // Answers "can we raise the daily budget?" directly, rather than leaving
+    // it to be inferred from two cumulative totals. The rate compared
+    // against is the month-to-date average, which is NOT the same as the
+    // daily budget set in Meta -- days before a campaign launched drag it
+    // down -- so it is labelled as an average everywhere it appears.
+    function headroomCard() {
+      if (sustainableDaily == null) {
+        return `
+          <div class="trend-card wide">
+            <h5>Daily budget headroom</h5>
+            <div class="pace-value">${DASH}</div>
+            <div class="pace-note">Last day of the month ${MIDDOT} no remaining days to pace against.</div>
+          </div>`;
+      }
+
+      const overspent = budgetLeft <= 0;
+      // Against the month-to-date average, not against zero: at a standstill
+      // any leftover budget would read as infinite headroom.
+      const ratio = spendDailyPace > 0 ? sustainableDaily / spendDailyPace : null;
+      // Under budget and on budget are both fine, only overspending is not,
+      // so "room to scale" and "at capacity" share the good status and are
+      // told apart by the note below.
+      const status = overspent ? 'critical'
+        : ratio == null || ratio >= 0.90 ? 'good'
+        : ratio >= 0.75 ? 'warning'
+        : 'critical';
+
+      let note;
+      if (overspent) {
+        note = `<b>${fmtMoney(Math.abs(budgetLeft))} over the ${fmtMoney(MONTHLY_GOALS.spendBudget)} cap</b> with ${daysLeft} day${daysLeft === 1 ? '' : 's'} still to run ${MIDDOT} pause or cut back to avoid going further over.`;
+      } else if (ratio == null) {
+        note = `Nothing spent yet this month, so the full ${fmtMoney(budgetLeft)} is available across ${daysLeft} remaining day${daysLeft === 1 ? '' : 's'}.`;
+      } else if (ratio >= 1.10) {
+        note = `<b>Room to scale.</b> Running ${fmtMoney(spendDailyPace)}/day on average so far, so the daily budget could go up to ${fmtMoney(sustainableDaily)} and still land on ${fmtMoney(MONTHLY_GOALS.spendBudget)}.`;
+      } else if (ratio >= 0.90) {
+        note = `<b>At capacity.</b> The ${fmtMoney(spendDailyPace)}/day average is about all the remaining ${fmtMoney(budgetLeft)} supports ${MIDDOT} raising the daily budget would push past ${fmtMoney(MONTHLY_GOALS.spendBudget)}.`;
+      } else {
+        note = `<b>Spending too fast.</b> The ${fmtMoney(spendDailyPace)}/day average leaves only ${fmtMoney(sustainableDaily)}/day for the remaining ${daysLeft} day${daysLeft === 1 ? '' : 's'} ${MIDDOT} ease back to stay inside ${fmtMoney(MONTHLY_GOALS.spendBudget)}.`;
+      }
+
+      // Current average as a share of what is affordable. Over 100% means
+      // the current rate cannot be carried to month end.
+      const fillPct = sustainableDaily > 0 && spendDailyPace > 0
+        ? Math.min(100, (spendDailyPace / sustainableDaily) * 100)
+        : (overspent ? 100 : 0);
+
+      return `
+        <div class="trend-card wide">
+          <h5>Daily budget headroom</h5>
+          <div class="pace-value">${overspent ? fmtMoney(0) : fmtMoney(sustainableDaily)}<span class="pace-of">/day available for the last ${daysLeft} day${daysLeft === 1 ? '' : 's'}</span></div>
+          <div class="pace-bar"><div class="pace-fill ${status}" style="width:${fillPct.toFixed(1)}%"></div></div>
+          <div class="pace-note"><span class="status-dot ${status}"></span>${note}</div>
+        </div>`;
+    }
+
     el.innerHTML =
       paceCard('Monthly Ad Spend', spendMTD, MONTHLY_GOALS.spendBudget, fmtMoney, false) +
-      paceCard('Monthly Bookings', bookingsMTD, MONTHLY_GOALS.leadsTarget, (n) => n.toLocaleString(), true);
+      paceCard('Monthly Bookings', bookingsMTD, MONTHLY_GOALS.leadsTarget, (n) => n.toLocaleString(), true) +
+      headroomCard();
 
     document.getElementById('pacing-note').textContent =
       `${new Date(TODAY + 'T00:00:00Z').toLocaleDateString('en-AU', { month: 'long', year: 'numeric', timeZone: 'UTC' })} to date `
@@ -324,26 +390,43 @@ function runDashboard(D) {
     // accounts for creative fatigue, seasonality, or anything changing.
     // dailyPace is defined so this lands exactly on the last actual point,
     // no kink where the solid line becomes dashed.
-    const spendDailyPace = daysElapsed ? spendMTD / daysElapsed : 0;
-    const bookingsDailyPace = daysElapsed ? bookingsMTD / daysElapsed : 0;
     const spendCum = daysList.map((_, i) => i < daysElapsed ? spendActual[i] : spendDailyPace * (i + 1));
     const bookingsCum = daysList.map((_, i) => i < daysElapsed ? bookingsActual[i] : bookingsDailyPace * (i + 1));
     const lastActualIdx = daysElapsed - 1;
+
+    // Where spending every remaining dollar evenly would take us: starts at
+    // today's actual total and lands exactly on the cap. The gap between
+    // this and the projection above IS the headroom -- if the projection
+    // sits below it there is budget going unused, above it means overspend.
+    // Drawn only from today rightward, so the earlier values exist purely to
+    // keep the array aligned to the x-axis.
+    const budgetCeiling = daysList.map((_, i) => i <= lastActualIdx
+      ? spendActual[Math.max(0, Math.min(i, lastActualIdx))]
+      : spendMTD + (budgetLeft * (i - lastActualIdx)) / daysLeft);
 
     const spendPace = daysList.map((_, i) => (MONTHLY_GOALS.spendBudget / totalDays) * (i + 1));
     const bookingsPace = daysList.map((_, i) => (MONTHLY_GOALS.leadsTarget / totalDays) * (i + 1));
     const fmtMoneyShortPace = (n) => n >= 1000 ? '$' + (n / 1000).toFixed(1) + 'k' : fmtMoney(n);
 
+    const spendSeries = [
+      {
+        values: spendCum, color: 'var(--cat-1)', dashedFrom: lastActualIdx,
+        tooltips: daysList.map((d, i) => i < daysElapsed
+          ? `${fmtDate(d)}: ${fmtMoney(spendCum[i])} spent`
+          : `${fmtDate(d)}: ${fmtMoney(spendCum[i])} projected at current daily pace`),
+      },
+      { values: spendPace, color: 'var(--ink-3)', dashedFrom: 0, isReference: true, tooltips: daysList.map((d, i) => `${fmtDate(d)}: ${fmtMoney(spendPace[i])} pace`) },
+    ];
+    // Only worth drawing while budget remains and days remain to spend it.
+    if (daysLeft > 0 && budgetLeft > 0) {
+      spendSeries.push({
+        values: budgetCeiling, color: 'var(--good)', dashedFrom: lastActualIdx, isReference: true,
+        tooltips: daysList.map((d, i) => `${fmtDate(d)}: ${fmtMoney(budgetCeiling[i])} if the full budget is used evenly`),
+      });
+    }
+
     document.getElementById('pace-trend-spend').innerHTML = svgLines(
-      [
-        {
-          values: spendCum, color: 'var(--cat-1)', dashedFrom: lastActualIdx,
-          tooltips: daysList.map((d, i) => i < daysElapsed
-            ? `${fmtDate(d)}: ${fmtMoney(spendCum[i])} spent`
-            : `${fmtDate(d)}: ${fmtMoney(spendCum[i])} projected at current daily pace`),
-        },
-        { values: spendPace, color: 'var(--ink-3)', dashedFrom: 0, isReference: true, tooltips: daysList.map((d, i) => `${fmtDate(d)}: ${fmtMoney(spendPace[i])} pace`) },
-      ],
+      spendSeries,
       { dates: daysList, valueFmt: fmtMoneyShortPace }
     );
     document.getElementById('pace-trend-leads').innerHTML = svgLines(
