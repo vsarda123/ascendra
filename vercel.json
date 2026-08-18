@@ -6,6 +6,6 @@
     "api/setup-check.js": { "maxDuration": 60 }
   },
   "crons": [
-    { "path": "/api/cron/sync", "schedule": "0 6 * * *" }
+    { "path": "/api/cron/sync", "schedule": "0 19 * * *" }
   ]
 }

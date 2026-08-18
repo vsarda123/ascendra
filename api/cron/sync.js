@@ -10,6 +10,14 @@ const {
 // Runs on a schedule (see vercel.json crons) instead of on every page load,
 // so the dashboard itself never has to wait on Meta's slow Insights API --
 // it just reads whatever this last wrote.
+//
+// Schedule is "0 19 * * *" -- 19:00 UTC, which is 5am AEST / 6am AEDT the
+// next calendar day. That used to be 6am UTC (4pm Sydney/Melbourne), so the
+// day's only sync landed in the Australian afternoon and every morning
+// check saw the sync run from the day before -- always at least a full day
+// stale. Early morning, after the ad account's previous day has closed out
+// but before anyone's first login, keeps that gap to the one day that's
+// unavoidable anyway (Meta can't finalize spend for a day that isn't over).
 module.exports = async (req, res) => {
   // Vercel Cron sends this header automatically when CRON_SECRET is set as
   // an env var; without this check anyone could hit this URL and burn

@@ -242,11 +242,14 @@ function runDashboard(D) {
   // The dashboard's TODAY is the last date that actually has a synced spend
   // row (see data.js), not the real calendar date -- deliberately, so
   // pacing never shows a fake $0 day for today before the sync has run.
-  // But every preset ("Last 7 days" etc.) is computed from that same TODAY,
-  // so if the sync is a day behind, every preset range silently shifts back
-  // a day too, and a manual count against the raw sheet using the real
-  // calendar date won't match. Surfacing the gap here is cheaper and safer
-  // than changing what TODAY means everywhere else it's used.
+  // Under normal operation TODAY is always exactly one day behind the real
+  // calendar date: Meta can't finalize a day's spend until that day is
+  // over, so even a same-morning sync will never have a row for today, only
+  // through yesterday. That's expected, not stale -- comparing TODAY
+  // straight against the real date (as this used to) flagged that expected
+  // one-day gap as a warning every single morning. Only a gap of *more*
+  // than one day means the sync actually missed a run and is worth
+  // surfacing.
   function localTodayStr() {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -258,10 +261,12 @@ function runDashboard(D) {
     const staleEl = document.getElementById('data-staleness');
     if (staleEl) {
       const real = localTodayStr();
-      staleEl.textContent = real === TODAY
-        ? ''
-        : `Data current through ${fmtDate(TODAY)} ${DASH_EN} presets are computed from that date, not today (${fmtDate(real)}), so a manual count against the raw sheet for "today" won't match until the next sync lands.`;
-      staleEl.style.display = real === TODAY ? 'none' : '';
+      const gapDays = Math.round((new Date(real + 'T00:00:00Z') - new Date(TODAY + 'T00:00:00Z')) / 86400000);
+      const isStale = gapDays > 1;
+      staleEl.textContent = isStale
+        ? `Data current through ${fmtDate(TODAY)} ${DASH_EN} the sync hasn't run in ${gapDays} days, so presets and a manual count against the raw sheet won't match until it catches up.`
+        : '';
+      staleEl.style.display = isStale ? '' : 'none';
     }
   }
 
