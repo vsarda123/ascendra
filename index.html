@@ -58,6 +58,39 @@
 </nav>
 
 <section>
+  <h2 class="sh">Monthly pacing</h2>
+  <p class="sh-note" id="pacing-note">Whole account, calendar month to date &mdash; not affected by the filters above</p>
+  <div class="trend-grid" id="pacing-grid"></div>
+
+  <div class="trend-grid" style="margin-top:18px">
+    <div class="trend-card">
+      <h5>Spend vs budget pace</h5>
+      <div id="pace-trend-spend"></div>
+      <div class="trend-legend">
+        <span><span class="sw" style="background:var(--cat-1)"></span>Actual cumulative spend</span>
+        <span><span class="sw" style="background:var(--ink-3)"></span>Ideal pace to $4,000</span>
+      </div>
+    </div>
+    <div class="trend-card">
+      <h5>Bookings vs target pace</h5>
+      <div id="pace-trend-leads"></div>
+      <div class="trend-legend">
+        <span><span class="sw" style="background:var(--cat-4)"></span>Actual cumulative bookings</span>
+        <span><span class="sw" style="background:var(--ink-3)"></span>Ideal pace to 50</span>
+      </div>
+    </div>
+    <div class="trend-card wide">
+      <h5>Cost per lead vs target</h5>
+      <div id="pace-trend-cpl"></div>
+      <div class="trend-legend">
+        <span><span class="sw" style="background:var(--cat-2)"></span>Cumulative cost per lead</span>
+        <span><span class="sw" style="background:var(--ink-3)"></span>$80 target ($4,000 &divide; 50)</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
   <h2 class="sh">Marketing &mdash; is the ad + page machine working?</h2>
   <p class="sh-note" id="marketing-week-note"></p>
   <div class="kpi-grid six" id="kpi-marketing"></div>
@@ -88,7 +121,19 @@
       <div id="trend-funnel"></div>
       <div class="trend-legend"><span><span class="sw" style="background:var(--cat-2)"></span><span id="trend-cpc-legend"></span></span></div>
     </div>
+    <div class="trend-card wide">
+      <h5>Bookings over time</h5>
+      <div id="trend-leads"></div>
+      <div class="trend-legend"><span><span class="sw" style="background:var(--cat-4)"></span><span id="trend-leads-legend"></span></span></div>
+    </div>
   </div>
+</section>
+
+<section>
+  <h2 class="sh">Spend by campaign</h2>
+  <p class="sh-note" id="campaign-spend-note"></p>
+  <div class="mock" id="campaign-spend-block"></div>
+  <div class="unattr" id="campaign-opportunities" style="display:none"></div>
 </section>
 
 <section>
@@ -117,10 +162,10 @@
 </section>
 
 <footer>
-  Ascendra Financial &middot; internal reporting prototype. Pulls live data from Meta, ClickFunnels, and the Sheet ledger via <code>/api/data</code> when configured; falls back to sample data otherwise (see the badge above).
+  Ascendra Financial &middot; internal reporting prototype. Pulls live data from Meta, ClickFunnels, and the Sheet ledger via <code>/api/data</code> when configured; sections without a connected source are left blank rather than estimated (see the badge above).
 </footer>
 
-<script src="app.js?v=2026081202"></script>
+<script src="app.js?v=2026081802"></script>
 <script src="data.js?v=2026081202"></script>
 <script>
   fetch('/api/auth/me').then(r => r.json()).then(d => {

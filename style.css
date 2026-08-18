@@ -72,7 +72,7 @@ header.brandbar {
   display: inline-block; margin-top: 10px; font-family: var(--mono); font-size: 10.5px;
   padding: 4px 10px; border-radius: 20px; letter-spacing: 0.02em;
 }
-.source-badge.mock { background: color-mix(in srgb, var(--warning) 16%, transparent); color: #8a5a00; }
+.source-badge.empty { background: color-mix(in srgb, var(--warning) 16%, transparent); color: #8a5a00; }
 .source-badge.live { background: color-mix(in srgb, var(--good) 16%, transparent); color: var(--good-text); }
 
 /* ---- filter bar ---- */
@@ -173,6 +173,18 @@ h2.sh { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spa
 .trend-card svg { width: 100%; height: auto; display: block; overflow: visible; }
 .trend-legend { display: flex; gap: 14px; margin-top: 8px; font-size: 10.5px; color: var(--ink-3); flex-wrap: wrap; }
 .trend-legend .sw { width: 8px; height: 8px; border-radius: 2px; display: inline-block; margin-right: 5px; }
+.trend-card.wide { grid-column: 1 / -1; }
+
+/* ---- monthly pacing ---- */
+.pace-value { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; margin-bottom: 8px; }
+.pace-value .pace-of { font-size: 12px; font-weight: 400; color: var(--ink-3); }
+.pace-bar { height: 8px; border-radius: 5px; background: var(--surface-2); border: 1px solid var(--hairline); overflow: hidden; }
+.pace-fill { height: 100%; border-radius: 5px 0 0 5px; transition: width 0.2s ease; }
+.pace-fill.good { background: var(--good); }
+.pace-fill.warning { background: var(--warning); }
+.pace-fill.critical { background: var(--critical); }
+.pace-note { font-size: 11px; color: var(--ink-3); margin-top: 8px; }
+.pace-note .status-dot { margin-right: 5px; }
 
 /* ---- table ---- */
 .tablewrap { overflow-x: auto; border: 1px solid var(--hairline); border-radius: 10px; background: var(--surface); margin-bottom: 40px; }

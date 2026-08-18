@@ -2,9 +2,9 @@
   Data loader for the Ascendra Financial Meta Ads dashboard.
 
   Tries /api/data (Meta + ClickFunnels + Google Sheets, see api/data.js)
-  first. If that endpoint isn't configured yet, errors, or simply returns
-  no rows, this falls back to a deterministic mock generator so the
-  dashboard always renders something rather than breaking. app.js is loaded
+  first. If that endpoint isn't configured yet, errors, or simply returns no
+  rows, the dashboard renders with real zeros/blanks instead -- no invented
+  numbers stand in for a source that isn't connected yet. app.js is loaded
   up front via a plain script tag (see index.html) -- this file just calls
   window.renderDashboard(data) once data is ready.
 */
@@ -21,83 +21,17 @@
   const DASH = String.fromCharCode(8212);
   const DASH_EN = String.fromCharCode(8211);
 
-  // ---------------------------------------------------------- mock fallback
-  function mulberry32(seed) {
-    return function () {
-      seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
-      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-  }
+  // ------------------------------------------------------------ empty shell
+  // No invented numbers. Before live data arrives, and whenever it comes
+  // back empty, every section reads a real zero/blank instead -- app.js
+  // already renders that cleanly (dashed-out KPIs, "not connected" funnel
+  // stages, an empty table), so there's nothing to synthesize here beyond
+  // today's real date for the range pickers to anchor on.
+  function isoDate(d) { return d.toISOString().slice(0, 10); }
 
-  function buildMockData() {
-    const rng = mulberry32(20260804);
-    const rand = (min, max) => min + rng() * (max - min);
-    const SIM_TODAY = new Date('2026-08-04T00:00:00Z');
-
-    // UTC throughout, matching app.js -- a local-time parse formatted back
-    // through toISOString() shifts the date by a day east of Greenwich.
-    function addDays(date, n) { const d = new Date(date); d.setUTCDate(d.getUTCDate() + n); return d; }
-    function isoDate(d) { return d.toISOString().slice(0, 10); }
-
-    const HISTORY_DAYS = 98;
-    const DATES = Array.from({ length: HISTORY_DAYS }, (_, i) => isoDate(addDays(SIM_TODAY, -(HISTORY_DAYS - 1 - i))));
-    const TODAY = DATES[DATES.length - 1];
-    const EARLIEST = DATES[0];
-
-    const _MOCK_CAMPAIGN_DEFS = [
-      { campaign: `Rate Rise Anxiety ${DASH_EN} Retarget`, audience: 'Website visitors, 30d', creative: '"Are You Overpaying" static', landingPage: '/rate-check', baseWeeklySpend: 2100, baseCpc: 1.55, bookRate: 0.024 },
-      { campaign: `Refinance ${DASH_EN} Owner Occupier`, audience: '1% Lookalike, refinancers', creative: '"Rate Check" video', landingPage: '/refinance-check', baseWeeklySpend: 6100, baseCpc: 2.05, bookRate: 0.016 },
-      { campaign: `First Home Buyer ${DASH_EN} FOMO`, audience: 'Interest: first home buyers', creative: 'Deposit calculator carousel', landingPage: '/first-home-buyer', baseWeeklySpend: 5000, baseCpc: 1.95, bookRate: 0.013 },
-      { campaign: `Broad Prospecting ${DASH_EN} 3% LAL`, audience: '3% Lookalike, all customers', creative: '"Meet the Team" video', landingPage: '/home', baseWeeklySpend: 3850, baseCpc: 1.70, bookRate: 0.009 },
-    ];
-
-    const DAILY_SPEND = [];
-    for (const date of DATES) {
-      for (const c of _MOCK_CAMPAIGN_DEFS) {
-        const spend = Math.round((c.baseWeeklySpend / 7) * rand(0.7, 1.35));
-        const cpc = c.baseCpc * rand(0.85, 1.18);
-        const clicks = Math.round(spend / cpc);
-        const lpViewRate = rand(0.78, 0.92);
-        const landingPageViews = Math.round(clicks * lpViewRate);
-        DAILY_SPEND.push({
-          date, spend, clicks, landingPageViews,
-          campaign: c.campaign, audience: c.audience, creative: c.creative, landingPage: c.landingPage,
-        });
-      }
-    }
-
-    let leadSeq = 1;
-    const LEADS = [];
-    for (const date of DATES) {
-      const daysAgo = HISTORY_DAYS - 1 - DATES.indexOf(date);
-      const matured = daysAgo >= MATURITY_DAYS;
-
-      for (const c of _MOCK_CAMPAIGN_DEFS) {
-        const spendRow = DAILY_SPEND.find(r => r.date === date && r.campaign === c.campaign);
-        const bookings = Math.round(spendRow.landingPageViews * c.bookRate * rand(0.5, 1.6));
-
-        for (let i = 0; i < bookings; i++) {
-          const unattributed = rng() < 0.04;
-          const attended = rng() < 0.76;
-
-          LEADS.push({
-            id: 'L' + (leadSeq++),
-            generatedDate: date,
-            campaign: unattributed ? null : c.campaign,
-            audience: unattributed ? null : c.audience,
-            creative: unattributed ? null : c.creative,
-            landingPage: unattributed ? null : c.landingPage,
-            attended, attendanceRecorded: true, matured,
-          });
-        }
-      }
-    }
-
-    // Sample bookings stand in for both stages; the mock exists only so the
-    // shell has something to draw before live data arrives.
-    return { DATES, TODAY, EARLIEST, MATURITY_DAYS, DAILY_SPEND, LEADS, OPTINS: [], ATTRIBUTION: null };
+  function buildEmptyData() {
+    const today = isoDate(new Date());
+    return { DATES: [], TODAY: today, EARLIEST: today, MATURITY_DAYS, DAILY_SPEND: [], LEADS: [], OPTINS: [], ATTRIBUTION: null };
   }
 
   // -------------------------------------------------------------- live data
@@ -122,30 +56,16 @@
   // Live Meta data always has real campaign/audience/creative/spend/clicks --
   // that part of the pipeline is proven working. What's frequently NOT wired
   // up yet is the landing-page mapping (data-sources.config.js CAMPAIGN_PAGE_MAP
-  // starts empty) and the Sheets/CRM lead ledger (needs its own service-account
-  // setup). Rather than showing those sections fully blank while the rest of
-  // the dashboard has real numbers, backfill plausible placeholder values
-  // derived FROM the real rows, clearly flagged in sourceInfo.placeholders so
-  // the badge says so -- this lets every section of the UI be exercised and
-  // verified even before every source is fully connected.
-  function slugify(name) {
-    return '/' + String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
-  }
-
-  function backfillLandingPages(dailySpend) {
-    const bySlug = {};
-    let usedPlaceholder = false;
-    const rows = dailySpend.map(r => {
-      if (r.landingPage) return r;
-      usedPlaceholder = true;
-      if (!bySlug[r.campaign]) bySlug[r.campaign] = slugify(r.campaign);
-      return { ...r, landingPage: bySlug[r.campaign] };
-    });
-    return { rows, usedPlaceholder };
+  // starts empty). Rows without one keep landingPage as null rather than a
+  // guessed slug -- app.js already drops nulls from the landing-page filter
+  // and simply doesn't show one in the table, so there's nothing to invent.
+  function hasUnmappedLandingPage(dailySpend) {
+    return dailySpend.some(r => !r.landingPage);
   }
 
   function toDashboardData(json) {
-    const { rows: dailySpend, usedPlaceholder: landingPagePlaceholder } = backfillLandingPages(json.dailySpend);
+    const dailySpend = json.dailySpend;
+    const landingPagePlaceholder = hasUnmappedLandingPage(dailySpend);
     const dates = [...new Set(dailySpend.map(r => r.date))].sort();
     const today = dates[dates.length - 1];
     const earliest = dates[0];
@@ -177,12 +97,13 @@
   }
 
   // ------------------------------------------------------------------ boot
-  // Render is never gated on the network. Sample data paints the full
-  // dashboard within milliseconds of the script running, then the live Meta
-  // numbers replace it in place once /api/data answers. Previously a single
-  // slow or stalled fetch left every section permanently blank, because
-  // nothing rendered at all until the request had resolved one way or the
-  // other -- there was no reason for the shell to wait on it.
+  // Render is never gated on the network. The empty shell paints the full
+  // dashboard (all real zeros/blanks) within milliseconds of the script
+  // running, then the live Meta numbers replace it in place once /api/data
+  // answers. Previously a single slow or stalled fetch left every section
+  // permanently blank, because nothing rendered at all until the request had
+  // resolved one way or the other -- there was no reason for the shell to
+  // wait on it.
   let data, sourceInfo;
 
   function publish() {
@@ -199,8 +120,8 @@
     }
   }
 
-  data = buildMockData();
-  sourceInfo = { mode: 'mock', loading: true };
+  data = buildEmptyData();
+  sourceInfo = { mode: 'loading', loading: true };
   publish();
 
   try {
@@ -209,10 +130,10 @@
       data = toDashboardData(live.meta);
       sourceInfo = { mode: 'live', sources: live.meta.sources, errors: live.meta.errors, dataSource: live.meta.dataSource, placeholders: data.placeholders };
     } else {
-      sourceInfo = { mode: 'mock', sources: live ? live.meta.sources : null, errors: live ? live.meta.errors : null };
+      sourceInfo = { mode: 'empty', sources: live ? live.meta.sources : null, errors: live ? live.meta.errors : null };
     }
   } catch (e) {
-    sourceInfo = { mode: 'mock', error: `${e.name}: ${e.message}` };
+    sourceInfo = { mode: 'empty', error: `${e.name}: ${e.message}` };
   }
   publish();
 
@@ -220,8 +141,8 @@
     const el = document.getElementById('source-badge');
     if (!el) return;
     if (sourceInfo.loading) {
-      el.textContent = `Sample data shown ${DASH} loading live Meta data...`;
-      el.className = 'source-badge mock';
+      el.textContent = 'Loading live Meta data...';
+      el.className = 'source-badge empty';
       return;
     }
     if (sourceInfo.mode === 'live') {
@@ -238,8 +159,8 @@
       el.textContent = `Live data ${MIDDOT} ${parts.join(' ' + MIDDOT + ' ')}`;
       el.className = 'source-badge live';
     } else {
-      el.textContent = sourceInfo.error ? `Sample data ${DASH} live fetch failed: ${sourceInfo.error}` : `Sample data ${DASH} no data source connected yet`;
-      el.className = 'source-badge mock';
+      el.textContent = sourceInfo.error ? `No data ${DASH} live fetch failed: ${sourceInfo.error}` : `No data source connected yet`;
+      el.className = 'source-badge empty';
     }
   }
 })();

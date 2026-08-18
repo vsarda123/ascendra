@@ -25,6 +25,14 @@ function runDashboard(D) {
   const OPTINS = D.OPTINS || [];
   const ATTRIBUTION = D.ATTRIBUTION || null;
 
+  // This month's plan, entered by hand -- Meta has no concept of "our
+  // monthly budget" or "our lead target", so there's nothing to read this
+  // from. Kept here rather than threaded through the API/sync pipeline: it's
+  // a display target, not data, and has no business sitting in the same path
+  // as the Meta/ClickFunnels/Sheets join that's fragile enough already.
+  // Update both at the start of each month.
+  const MONTHLY_GOALS = { spendBudget: 4000, leadsTarget: 50 };
+
   const state = { preset: 'last90', from: null, to: null, campaign: 'all', audience: 'all', creative: 'all', landingPage: 'all' };
   // Highest spend first: with no settlement data to rank on, the money going
   // out is the thing worth looking at from the top of the table down.
@@ -233,6 +241,121 @@ function runDashboard(D) {
       initFilterBar();
       renderAll();
     };
+  }
+
+  // ------------------------------------------------------------- pacing
+  // Whole-account, calendar-month-to-date, deliberately ignoring the filter
+  // bar above -- a $4,000 monthly budget or a 50-booking target means
+  // nothing once sliced down to one campaign, so this reads DAILY_SPEND/
+  // LEADS directly rather than through spendFor()/leadsFor().
+  function daysInMonthOf(dateStr) {
+    const d = new Date(dateStr + 'T00:00:00Z');
+    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+  }
+  function firstOfMonthOf(dateStr) {
+    const d = new Date(dateStr + 'T00:00:00Z');
+    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)).toISOString().slice(0, 10);
+  }
+
+  function renderMonthlyPacing() {
+    const el = document.getElementById('pacing-grid');
+    if (!el) return;
+
+    const monthStart = firstOfMonthOf(TODAY);
+    const daysElapsed = new Date(TODAY + 'T00:00:00Z').getUTCDate();
+    const totalDays = daysInMonthOf(TODAY);
+    const daysLeft = totalDays - daysElapsed;
+
+    const spendMTD = DAILY_SPEND
+      .filter(r => r.date >= monthStart && r.date <= TODAY)
+      .reduce((s, r) => s + r.spend, 0);
+    const bookingsMTD = LEADS.filter(l => l.generatedDate >= monthStart && l.generatedDate <= TODAY).length;
+
+    // higherIsBetter: spend wants to land AT or UNDER goal; bookings want to
+    // land AT or OVER goal. Same math, opposite "good" direction.
+    function paceCard(label, actual, goal, fmt, higherIsBetter) {
+      const pctActual = goal ? (actual / goal) * 100 : 0;
+      const dailyPace = daysElapsed ? actual / daysElapsed : 0;
+      const projected = dailyPace * totalDays;
+      const pctProjected = goal ? (projected / goal) * 100 : 0;
+
+      const status = higherIsBetter
+        ? (pctProjected >= 100 ? 'good' : pctProjected >= 80 ? 'warning' : 'critical')
+        : (pctProjected <= 100 ? 'good' : pctProjected <= 115 ? 'warning' : 'critical');
+      const statusText = higherIsBetter
+        ? { good: 'on pace to hit target', warning: 'tracking behind target', critical: 'well behind target' }[status]
+        : { good: 'on pace, within budget', warning: 'tracking slightly over budget', critical: 'tracking well over budget' }[status];
+
+      return `
+        <div class="trend-card">
+          <h5>${label}</h5>
+          <div class="pace-value">${fmt(actual)} <span class="pace-of">of ${fmt(goal)}</span></div>
+          <div class="pace-bar"><div class="pace-fill ${status}" style="width:${Math.min(100, pctActual).toFixed(1)}%"></div></div>
+          <div class="pace-note"><span class="status-dot ${status}"></span>${statusText} ${MIDDOT} projected ${fmt(Math.round(projected))} by month end ${MIDDOT} ${daysLeft} day${daysLeft === 1 ? '' : 's'} left</div>
+        </div>`;
+    }
+
+    el.innerHTML =
+      paceCard('Monthly Ad Spend', spendMTD, MONTHLY_GOALS.spendBudget, fmtMoney, false) +
+      paceCard('Monthly Bookings', bookingsMTD, MONTHLY_GOALS.leadsTarget, (n) => n.toLocaleString(), true);
+
+    document.getElementById('pacing-note').textContent =
+      `${new Date(TODAY + 'T00:00:00Z').toLocaleDateString('en-AU', { month: 'long', year: 'numeric', timeZone: 'UTC' })} to date `
+      + `(day ${daysElapsed} of ${totalDays}) ${MIDDOT} whole account, not affected by the filters above`;
+
+    // Day-by-day trajectory against an ideal straight-line pace, not just
+    // the single end-of-month projection above -- this is what actually
+    // shows whether a slow start is catching up or falling further behind.
+    // Only plotted through today: extending the actual line into days that
+    // haven't happened yet would mean inventing them.
+    const daysList = Array.from({ length: daysElapsed }, (_, i) => addDaysStr(monthStart, i));
+    const spendByDate = {};
+    for (const r of DAILY_SPEND) spendByDate[r.date] = (spendByDate[r.date] || 0) + r.spend;
+    const bookingsByDate = {};
+    for (const l of LEADS) bookingsByDate[l.generatedDate] = (bookingsByDate[l.generatedDate] || 0) + 1;
+
+    let runningSpend = 0;
+    const spendCum = daysList.map(d => { runningSpend += (spendByDate[d] || 0); return runningSpend; });
+    let runningBookings = 0;
+    const bookingsCum = daysList.map(d => { runningBookings += (bookingsByDate[d] || 0); return runningBookings; });
+
+    const spendPace = daysList.map((_, i) => (MONTHLY_GOALS.spendBudget / totalDays) * (i + 1));
+    const bookingsPace = daysList.map((_, i) => (MONTHLY_GOALS.leadsTarget / totalDays) * (i + 1));
+    const fmtMoneyShortPace = (n) => n >= 1000 ? '$' + (n / 1000).toFixed(1) + 'k' : fmtMoney(n);
+
+    document.getElementById('pace-trend-spend').innerHTML = svgLines(
+      [
+        { values: spendCum, color: 'var(--cat-1)', tooltips: daysList.map((d, i) => `${fmtDate(d)}: ${fmtMoney(spendCum[i])} spent`) },
+        { values: spendPace, color: 'var(--ink-3)', dashedFrom: 0, tooltips: daysList.map((d, i) => `${fmtDate(d)}: ${fmtMoney(spendPace[i])} pace`) },
+      ],
+      { dates: daysList, valueFmt: fmtMoneyShortPace }
+    );
+    document.getElementById('pace-trend-leads').innerHTML = svgLines(
+      [
+        { values: bookingsCum, color: 'var(--cat-4)', tooltips: daysList.map((d, i) => `${fmtDate(d)}: ${bookingsCum[i]} booked`) },
+        { values: bookingsPace, color: 'var(--ink-3)', dashedFrom: 0, tooltips: daysList.map((d, i) => `${fmtDate(d)}: ${bookingsPace[i].toFixed(1)} pace`) },
+      ],
+      { dates: daysList, valueFmt: (v) => Math.round(v).toString() }
+    );
+
+    // Cost per lead is undefined until the first booking of the month lands
+    // -- trimmed to start there rather than showing a divide-by-zero as $0.
+    const firstBookingIdx = bookingsCum.findIndex(v => v > 0);
+    const cplEl = document.getElementById('pace-trend-cpl');
+    if (firstBookingIdx === -1) {
+      cplEl.innerHTML = `<p style="color:var(--ink-3);font-style:italic;margin:8px 0">No bookings recorded yet this month.</p>`;
+    } else {
+      const cplDates = daysList.slice(firstBookingIdx);
+      const cplActual = cplDates.map((_, i) => spendCum[firstBookingIdx + i] / bookingsCum[firstBookingIdx + i]);
+      const cplTarget = MONTHLY_GOALS.spendBudget / MONTHLY_GOALS.leadsTarget;
+      cplEl.innerHTML = svgLines(
+        [
+          { values: cplActual, color: 'var(--cat-2)', tooltips: cplDates.map((d, i) => `${fmtDate(d)}: ${fmtMoney(cplActual[i])}/lead`) },
+          { values: cplDates.map(() => cplTarget), color: 'var(--ink-3)', dashedFrom: 0, tooltips: cplDates.map(() => `${fmtMoney(cplTarget)}/lead target`) },
+        ],
+        { dates: cplDates, valueFmt: (v) => '$' + v.toFixed(0) }
+      );
+    }
   }
 
   // ------------------------------------------------------------------ KPIs
@@ -484,6 +607,66 @@ function runDashboard(D) {
     }).join('')}</div>`;
   }
 
+  // ------------------------------------------------------------ campaign spend
+  // Which campaigns are actually driving the cost, ranked highest-spend
+  // first, plus a plain-language flag for the ones spending real money
+  // without producing bookings -- the same 'critical' threshold (>=$400/lead)
+  // already used to colour the campaign table below, so a campaign doesn't
+  // read as fine here and flagged there.
+  function renderCampaignSpend() {
+    const { from, to } = state;
+    const rows = spendFor(from, to);
+    const rangeLeads = leadsFor(from, to);
+    const noBookings = LEADS.length === 0;
+
+    const byCampaign = {};
+    for (const r of rows) {
+      if (!byCampaign[r.campaign]) byCampaign[r.campaign] = 0;
+      byCampaign[r.campaign] += r.spend;
+    }
+    const entries = Object.keys(byCampaign).map(name => {
+      const spend = byCampaign[name];
+      const bookings = rangeLeads.filter(l => l.campaign === name).length;
+      const costPerLead = bookings ? spend / bookings : null;
+      return { name, spend, bookings, costPerLead };
+    }).sort((a, b) => b.spend - a.spend);
+
+    const max = entries.length ? entries[0].spend : 1;
+    const shown = entries.slice(0, 10);
+
+    document.getElementById('campaign-spend-note').textContent =
+      `${fmtDate(from)} ${DASH_EN} ${fmtDate(to)} ${MIDDOT} ranked by spend`
+      + (entries.length > shown.length ? ` ${MIDDOT} top ${shown.length} of ${entries.length} campaigns shown` : '');
+
+    document.getElementById('campaign-spend-block').innerHTML = shown.length
+      ? `<div class="funnel">${shown.map(e => {
+          const widthPct = Math.max(4, (e.spend / max) * 100);
+          let dotClass = '';
+          if (!noBookings) dotClass = e.costPerLead == null ? 'critical' : e.costPerLead < 150 ? 'good' : e.costPerLead < 400 ? 'warning' : 'critical';
+          const meta = noBookings ? `${e.bookings} booked` : e.costPerLead != null ? `${fmtMoney(e.costPerLead)}/lead ${MIDDOT} ${e.bookings} booked` : 'no bookings yet';
+          return `<div class="fstage">
+            <span class="fname">${dotClass ? `<span class="status-dot ${dotClass}"></span>` : ''}${escapeHtml(e.name)}</span>
+            <span class="fbarwrap"><span class="fbar" style="width:${widthPct}%;background:var(--cat-1)">${fmtMoney(e.spend)}</span></span>
+            <span class="fmeta">${meta}</span>
+          </div>`;
+        }).join('')}</div>`
+      : `<p style="color:var(--ink-3);font-style:italic;margin:0">No spend in the selected range/filters.</p>`;
+
+    const block = document.getElementById('campaign-opportunities');
+    if (noBookings) { block.style.display = 'none'; return; }
+    const flagged = entries.filter(e => e.spend >= 50 && (e.costPerLead == null || e.costPerLead >= 400));
+    if (!flagged.length) {
+      block.style.display = 'none';
+    } else {
+      block.style.display = '';
+      block.innerHTML = `<b>${flagged.length} campaign${flagged.length === 1 ? '' : 's'} worth a look:</b><br>` +
+        flagged.slice(0, 5).map(e => e.costPerLead == null
+          ? `${escapeHtml(e.name)} ${DASH} ${fmtMoney(e.spend)} spent with no bookings recorded in this range`
+          : `${escapeHtml(e.name)} ${DASH} ${fmtMoney(e.costPerLead)} per lead, well above the rest`
+        ).join('<br>');
+    }
+  }
+
   // ----------------------------------------------------------------- trend
   // Compact axis label -- "5 Aug", no year, so it fits stacked under 90
   // daily bars without wrapping or overlapping its neighbours.
@@ -658,6 +841,22 @@ function runDashboard(D) {
     document.getElementById('trend-cpc-legend').textContent = priced.length
       ? `$${Math.min(...priced).toFixed(2)}${DASH_EN}$${Math.max(...priced).toFixed(2)} per link click`
       : 'no link clicks in range';
+
+    // How we're tracking on leads, not just spend -- same buckets as the
+    // charts above so a spend spike and a bookings dip line up visually.
+    const bookingsConnected = LEADS.length > 0;
+    const leadsByBucket = buckets.map(b => leadsFor(b.start, b.end).length);
+    document.getElementById('trend-leads').innerHTML = bookingsConnected
+      ? svgBars(leadsByBucket, {
+          color: 'var(--cat-4)',
+          dates,
+          tooltips: buckets.map((b, i) => `${bucketLabel(b)}: ${leadsByBucket[i]} booked`),
+          valueFmt: (v) => String(v),
+        })
+      : '';
+    document.getElementById('trend-leads-legend').textContent = bookingsConnected
+      ? `${Math.min(...leadsByBucket)}${DASH_EN}${Math.max(...leadsByBucket)} bookings per ${weekly ? 'week' : 'day'}`
+      : 'booking sheet not synced';
   }
 
   // ----------------------------------------------------------------- table
@@ -752,7 +951,7 @@ function runDashboard(D) {
   // Each section runs independently -- a bug in, say, the funnel shouldn't
   // also blank out the KPI tiles and table that would otherwise render fine.
   function renderAll() {
-    const sections = [renderKpisMarketing, renderKpisJourney, renderUnattributed, renderFunnel, renderTrend, renderTable];
+    const sections = [renderMonthlyPacing, renderKpisMarketing, renderKpisJourney, renderUnattributed, renderFunnel, renderTrend, renderCampaignSpend, renderTable];
     for (const fn of sections) {
       try { fn(); } catch (err) { showFatalError(err); }
     }
