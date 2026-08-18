@@ -80,9 +80,19 @@ function runDashboard(D) {
     d.setUTCDate(d.getUTCDate() + (day === 0 ? -6 : 1) - day);
     return d.toISOString().slice(0, 10);
   }
+  // Real calendar date, not D.TODAY (the last date with a synced spend
+  // row -- see the note above presetRange). Browsing and the "Today"/
+  // "Yesterday" presets need the real date so a lead that synced today
+  // actually shows up under "Today" instead of being clamped back to
+  // whatever day ad spend last synced through.
+  function localTodayStr() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
   function clampDate(dateStr) {
     if (dateStr < EARLIEST) return EARLIEST;
-    if (dateStr > TODAY) return TODAY;
+    const realToday = localTodayStr();
+    if (dateStr > realToday) return realToday;
     return dateStr;
   }
   function daysCount(from, to) {
@@ -97,31 +107,32 @@ function runDashboard(D) {
   // Mirrors the standard Meta Ads Manager / Google Ads preset set, plus a
   // fully custom start/end range.
   function presetRange(preset) {
+    const real = localTodayStr();
     switch (preset) {
-      case 'today': return { from: TODAY, to: TODAY };
-      case 'yesterday': { const y = addDaysStr(TODAY, -1); return { from: y, to: y }; }
-      case 'last7': return { from: clampDate(addDaysStr(TODAY, -6)), to: TODAY };
-      case 'last14': return { from: clampDate(addDaysStr(TODAY, -13)), to: TODAY };
-      case 'last30': return { from: clampDate(addDaysStr(TODAY, -29)), to: TODAY };
-      case 'thisweek': return { from: clampDate(weekStartOf(TODAY)), to: TODAY };
+      case 'today': return { from: real, to: real };
+      case 'yesterday': { const y = addDaysStr(real, -1); return { from: y, to: y }; }
+      case 'last7': return { from: clampDate(addDaysStr(real, -6)), to: real };
+      case 'last14': return { from: clampDate(addDaysStr(real, -13)), to: real };
+      case 'last30': return { from: clampDate(addDaysStr(real, -29)), to: real };
+      case 'thisweek': return { from: clampDate(weekStartOf(real)), to: real };
       case 'lastweek': {
-        const thisWkStart = weekStartOf(TODAY);
+        const thisWkStart = weekStartOf(real);
         return { from: clampDate(addDaysStr(thisWkStart, -7)), to: clampDate(addDaysStr(thisWkStart, -1)) };
       }
       case 'thismonth': {
-        const d = new Date(TODAY + 'T00:00:00Z');
+        const d = new Date(real + 'T00:00:00Z');
         const first = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
-        return { from: clampDate(first.toISOString().slice(0, 10)), to: TODAY };
+        return { from: clampDate(first.toISOString().slice(0, 10)), to: real };
       }
       case 'lastmonth': {
-        const d = new Date(TODAY + 'T00:00:00Z');
+        const d = new Date(real + 'T00:00:00Z');
         const lastMonthEnd = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 0));
         const lastMonthStart = new Date(Date.UTC(lastMonthEnd.getUTCFullYear(), lastMonthEnd.getUTCMonth(), 1));
         return { from: clampDate(lastMonthStart.toISOString().slice(0, 10)), to: clampDate(lastMonthEnd.toISOString().slice(0, 10)) };
       }
-      case 'last90': return { from: clampDate(addDaysStr(TODAY, -89)), to: TODAY };
-      case 'lifetime': return { from: EARLIEST, to: TODAY };
-      default: return { from: clampDate(addDaysStr(TODAY, -89)), to: TODAY };
+      case 'last90': return { from: clampDate(addDaysStr(real, -89)), to: real };
+      case 'lifetime': return { from: EARLIEST, to: real };
+      default: return { from: clampDate(addDaysStr(real, -89)), to: real };
     }
   }
 
@@ -239,21 +250,17 @@ function runDashboard(D) {
     ).join('');
   }
 
-  // The dashboard's TODAY is the last date that actually has a synced spend
-  // row (see data.js), not the real calendar date -- deliberately, so
-  // pacing never shows a fake $0 day for today before the sync has run.
-  // Under normal operation TODAY is always exactly one day behind the real
-  // calendar date: Meta can't finalize a day's spend until that day is
-  // over, so even a same-morning sync will never have a row for today, only
-  // through yesterday. That's expected, not stale -- comparing TODAY
-  // straight against the real date (as this used to) flagged that expected
-  // one-day gap as a warning every single morning. Only a gap of *more*
-  // than one day means the sync actually missed a run and is worth
+  // D.TODAY (used below and in Monthly Pacing) is the last date that
+  // actually has a synced spend row, not the real calendar date --
+  // deliberately, so pacing never shows a fake $0 day for today before the
+  // sync has run. Under normal operation it's always exactly one day behind
+  // the real calendar date: Meta can't finalize a day's spend until that
+  // day is over, so even a same-morning sync will never have a row for
+  // today, only through yesterday. That's expected, not stale -- comparing
+  // it straight against the real date (as this used to) flagged that
+  // expected one-day gap as a warning every single morning. Only a gap of
+  // *more* than one day means the sync actually missed a run and is worth
   // surfacing.
-  function localTodayStr() {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  }
   function updateRangeReadout() {
     document.getElementById('range-readout').textContent =
       state.from === state.to ? fmtDate(state.from) : `${fmtDate(state.from)} ${DASH_EN} ${fmtDate(state.to)}`;
@@ -292,7 +299,7 @@ function runDashboard(D) {
     const fromEl = document.getElementById('f-from');
     const toEl = document.getElementById('f-to');
     fromEl.min = toEl.min = EARLIEST;
-    fromEl.max = toEl.max = TODAY;
+    fromEl.max = toEl.max = localTodayStr();
 
     // Direct handler assignment, not addEventListener -- initFilterBar runs
     // again on the live-data re-render, and addEventListener would stack a
