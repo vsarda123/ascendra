@@ -57,3 +57,9 @@ alter table leads add column if not exists attendance_recorded boolean not null 
 -- looks like an attribution failure and hide how much of the funnel is
 -- unpaid.
 alter table leads add column if not exists channel text;
+
+-- What hour (0-23) a booking was created, read straight off the digits in
+-- the sheet's timestamp cell -- see extractHourFromRaw in lib/sources.js.
+-- Null on rows where that cell only ever held a date, with no time. Powers
+-- the booking-time heatmap; nothing downstream needs this for optins.
+alter table leads add column if not exists generated_hour smallint;

@@ -178,6 +178,7 @@ module.exports = async (req, res) => {
       id: b.id,
       kind: 'booking',
       generated_date: b.generatedDate,
+      generated_hour: b.generatedHour,
       campaign: b.campaign,
       audience: b.audience,
       creative: b.creative,

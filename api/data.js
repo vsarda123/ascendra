@@ -72,6 +72,9 @@ async function readFromSupabase(since, until) {
     id: l.id,
     kind: l.kind || 'optin',
     generatedDate: l.generated_date,
+    // Passed through as-is, not `|| null` -- hour 0 (midnight) is falsy and
+    // that pattern would silently turn every midnight booking into "unknown".
+    generatedHour: l.generated_hour,
     campaign: l.campaign,
     audience: l.audience,
     creative: l.creative,

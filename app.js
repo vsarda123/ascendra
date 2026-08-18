@@ -667,6 +667,75 @@ function runDashboard(D) {
     }
   }
 
+  // --------------------------------------------------------- booking heatmap
+  // Day-of-week x hour-of-day grid of when bookings actually land. Hour comes
+  // from generatedHour, read straight off the sheet's timestamp cell by
+  // lib/sources.js -- null on any booking recorded before that column
+  // existed, or where the sheet only ever held a date. Those are counted and
+  // disclosed, not silently dropped into an hour they weren't seen at.
+  function renderBookingHeatmap() {
+    const el = document.getElementById('heatmap-block');
+    if (!el) return;
+    const { from, to } = state;
+
+    if (LEADS.length === 0) {
+      el.innerHTML = `<p style="color:var(--ink-3);font-style:italic;margin:0">Booking sheet not synced yet.</p>`;
+      document.getElementById('heatmap-note').textContent = '';
+      return;
+    }
+
+    const rows = leadsFor(from, to);
+    const DOW_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const grid = Array.from({ length: 7 }, () => Array(24).fill(0));
+    let withHour = 0, withoutHour = 0;
+    for (const l of rows) {
+      if (l.generatedHour == null) { withoutHour++; continue; }
+      withHour++;
+      const dow = (new Date(l.generatedDate + 'T00:00:00Z').getUTCDay() + 6) % 7; // Mon=0..Sun=6
+      grid[dow][l.generatedHour]++;
+    }
+
+    document.getElementById('heatmap-note').textContent =
+      `${fmtDate(from)} ${DASH_EN} ${fmtDate(to)} ${MIDDOT} ${withHour} booking${withHour === 1 ? '' : 's'} with a recorded time`
+      + (withoutHour ? ` ${MIDDOT} ${withoutHour} without one, excluded from the grid` : '');
+
+    if (withHour === 0) {
+      el.innerHTML = `<p style="color:var(--ink-3);font-style:italic;margin:0">No bookings in this range have a recorded time yet.</p>`;
+      return;
+    }
+
+    let max = 0, peakDow = 0, peakHour = 0;
+    for (let d = 0; d < 7; d++) {
+      for (let h = 0; h < 24; h++) {
+        if (grid[d][h] > max) { max = grid[d][h]; peakDow = d; peakHour = h; }
+      }
+    }
+
+    const fmtHour = (h) => h === 0 ? '12am' : h < 12 ? `${h}am` : h === 12 ? '12pm' : `${h - 12}pm`;
+    const hourHeader = Array.from({ length: 24 }, (_, h) => `<div class="hm-hour">${h % 3 === 0 ? h : ''}</div>`).join('');
+
+    const bodyRows = DOW_LABELS.map((label, d) => {
+      const rowCells = Array.from({ length: 24 }, (_, h) => {
+        const count = grid[d][h];
+        const intensity = max ? count / max : 0;
+        const bg = count === 0 ? 'var(--surface-2)' : `color-mix(in srgb, var(--purple) ${Math.round(15 + intensity * 75)}%, var(--surface-2))`;
+        const isPeak = count === max && count > 0;
+        return `<div class="hm-cell${isPeak ? ' hm-peak' : ''}" style="background:${bg}" title="${label} ${fmtHour(h)}: ${count} booking${count === 1 ? '' : 's'}"></div>`;
+      }).join('');
+      return `<div class="hm-row"><div class="hm-label">${label}</div>${rowCells}</div>`;
+    }).join('');
+
+    el.innerHTML = `
+      <div class="heatmap">
+        <div class="hm-row hm-header"><div class="hm-label"></div>${hourHeader}</div>
+        ${bodyRows}
+      </div>
+      <div class="hm-legend">
+        <span>Fewer</span><span class="hm-scale"></span><span>More</span>
+        <span class="hm-legend-note">${MIDDOT} peak: ${DOW_LABELS[peakDow]} ${fmtHour(peakHour)}, ${max} booking${max === 1 ? '' : 's'}</span>
+      </div>`;
+  }
+
   // ----------------------------------------------------------------- trend
   // Compact axis label -- "5 Aug", no year, so it fits stacked under 90
   // daily bars without wrapping or overlapping its neighbours.
@@ -951,7 +1020,7 @@ function runDashboard(D) {
   // Each section runs independently -- a bug in, say, the funnel shouldn't
   // also blank out the KPI tiles and table that would otherwise render fine.
   function renderAll() {
-    const sections = [renderMonthlyPacing, renderKpisMarketing, renderKpisJourney, renderUnattributed, renderFunnel, renderTrend, renderCampaignSpend, renderTable];
+    const sections = [renderMonthlyPacing, renderKpisMarketing, renderKpisJourney, renderUnattributed, renderFunnel, renderTrend, renderCampaignSpend, renderBookingHeatmap, renderTable];
     for (const fn of sections) {
       try { fn(); } catch (err) { showFatalError(err); }
     }
