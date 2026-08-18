@@ -186,7 +186,11 @@
   Ascendra Financial &middot; internal reporting prototype. Pulls live data from Meta, ClickFunnels, and the Sheet ledger via <code>/api/data</code> when configured; sections without a connected source are left blank rather than estimated (see the badge above).
 </footer>
 
-<script src="app.js?v=2026081803"></script>
+<!-- Bump ?v= on EVERY app.js change. Without it the browser serves the
+     cached copy from the previous deploy and the new code never runs, which
+     looks exactly like a feature silently not working rather than a stale
+     asset. -->
+<script src="app.js?v=2026081810"></script>
 <script src="data.js?v=2026081202"></script>
 <script>
   fetch('/api/auth/me').then(r => r.json()).then(d => {
