@@ -239,9 +239,30 @@ function runDashboard(D) {
     ).join('');
   }
 
+  // The dashboard's TODAY is the last date that actually has a synced spend
+  // row (see data.js), not the real calendar date -- deliberately, so
+  // pacing never shows a fake $0 day for today before the sync has run.
+  // But every preset ("Last 7 days" etc.) is computed from that same TODAY,
+  // so if the sync is a day behind, every preset range silently shifts back
+  // a day too, and a manual count against the raw sheet using the real
+  // calendar date won't match. Surfacing the gap here is cheaper and safer
+  // than changing what TODAY means everywhere else it's used.
+  function localTodayStr() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
   function updateRangeReadout() {
     document.getElementById('range-readout').textContent =
       state.from === state.to ? fmtDate(state.from) : `${fmtDate(state.from)} ${DASH_EN} ${fmtDate(state.to)}`;
+
+    const staleEl = document.getElementById('data-staleness');
+    if (staleEl) {
+      const real = localTodayStr();
+      staleEl.textContent = real === TODAY
+        ? ''
+        : `Data current through ${fmtDate(TODAY)} ${DASH_EN} presets are computed from that date, not today (${fmtDate(real)}), so a manual count against the raw sheet for "today" won't match until the next sync lands.`;
+      staleEl.style.display = real === TODAY ? 'none' : '';
+    }
   }
 
   function syncCustomInputs() {

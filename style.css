@@ -115,6 +115,11 @@ header.brandbar {
   padding: 7px 12px; cursor: pointer;
 }
 .reset-btn:hover { border-color: var(--accent); }
+.data-staleness {
+  margin: 0; padding: 8px 24px; font-size: 11.5px; color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
+}
 
 section { max-width: 1180px; margin: 0 auto; padding: 34px 24px 0; }
 h2.sh { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-2); margin: 0 0 4px; }
