@@ -331,26 +331,29 @@ function runDashboard(D) {
     const el = document.getElementById('pacing-grid');
     if (!el) return;
 
-    // The month shown is the one the selected range ends in, so picking a
-    // date in July shows July rather than always the current month.
+    // The window starts where the selected range starts and runs to the end
+    // of the month that range ends in: pick 6 August and the budget paces
+    // across 6-31 August, not 1-31. Labelled with its real dates rather
+    // than a month name, so a window that is not a whole month cannot be
+    // mistaken for one -- which also keeps a long range (say 90 days)
+    // honest about pacing a monthly budget across more than a month.
     const anchor = state.to || TODAY;
-    const monthStart = firstOfMonthOf(anchor);
-    const totalDays = daysInMonthOf(anchor);
-    const monthEnd = addDaysStr(monthStart, totalDays - 1);
-    // A month that has already finished has data for all of it; the current
-    // one only up to today. Everything below keys off this rather than
-    // TODAY, which would read a past month as barely started.
-    const lastDay = monthEnd < TODAY ? monthEnd : TODAY;
-    const daysElapsed = new Date(lastDay + 'T00:00:00Z').getUTCDate();
-    const daysLeft = totalDays - daysElapsed;
-    const monthComplete = daysLeft === 0;
-    const monthLabel = new Date(anchor + 'T00:00:00Z')
-      .toLocaleDateString('en-AU', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+    const windowStart = state.from || firstOfMonthOf(anchor);
+    const windowEnd = addDaysStr(firstOfMonthOf(anchor), daysInMonthOf(anchor) - 1);
+    const totalDays = daysCount(windowStart, windowEnd);
+    // A window that has already finished has data for all of it; one still
+    // running only up to today. Everything below keys off this rather than
+    // TODAY, which would read a past window as barely started.
+    const lastDay = windowEnd < TODAY ? windowEnd : TODAY;
+    const daysElapsed = Math.max(1, daysCount(windowStart, lastDay));
+    const daysLeft = Math.max(0, totalDays - daysElapsed);
+    const windowComplete = daysLeft === 0;
+    const windowLabel = `${fmtDate(windowStart)} ${DASH_EN} ${fmtDate(windowEnd)}`;
 
     const spendMTD = DAILY_SPEND
-      .filter(r => r.date >= monthStart && r.date <= lastDay)
+      .filter(r => r.date >= windowStart && r.date <= lastDay)
       .reduce((s, r) => s + r.spend, 0);
-    const bookingsMTD = LEADS.filter(l => l.generatedDate >= monthStart && l.generatedDate <= lastDay).length;
+    const bookingsMTD = LEADS.filter(l => l.generatedDate >= windowStart && l.generatedDate <= lastDay).length;
 
     const spendDailyPace = daysElapsed ? spendMTD / daysElapsed : 0;
     const bookingsDailyPace = daysElapsed ? bookingsMTD / daysElapsed : 0;
@@ -376,7 +379,7 @@ function runDashboard(D) {
       // A finished month is reported in the past tense: "on pace to hit
       // target" about a month that has already ended reads as a forecast
       // for something that cannot change any more.
-      const statusText = monthComplete
+      const statusText = windowComplete
         ? (higherIsBetter
           ? { good: 'target met', warning: 'fell short of target', critical: 'well short of target' }[status]
           : { good: 'landed within budget', warning: 'came in slightly over budget', critical: 'came in well over budget' }[status])
@@ -384,9 +387,9 @@ function runDashboard(D) {
           ? { good: 'on pace to hit target', warning: 'tracking behind target', critical: 'well behind target' }[status]
           : { good: 'on pace, within budget', warning: 'tracking slightly over budget', critical: 'tracking well over budget' }[status]);
 
-      const tail = monthComplete
+      const tail = windowComplete
         ? `finished at ${fmt(Math.round(actual))}`
-        : `projected ${fmt(Math.round(projected))} by month end ${MIDDOT} ${daysLeft} day${daysLeft === 1 ? '' : 's'} left`;
+        : `projected ${fmt(Math.round(projected))} by ${fmtDate(windowEnd)} ${MIDDOT} ${daysLeft} day${daysLeft === 1 ? '' : 's'} left`;
 
       return `
         <div class="trend-card">
@@ -413,7 +416,7 @@ function runDashboard(D) {
         return `
           <div class="trend-card wide">
             <h5>Daily budget headroom</h5>
-            <div class="pace-value">${DASH} <span class="pace-of">${monthLabel} is complete</span></div>
+            <div class="pace-value">${DASH} <span class="pace-of">${windowLabel} is complete</span></div>
             <div class="pace-note"><span class="status-dot ${under >= 0 ? 'good' : 'critical'}"></span>Finished at ${fmtMoney(spendMTD)} of ${fmtMoney(MONTHLY_GOALS.spendBudget)} ${MIDDOT} ${verdict} ${MIDDOT} ${fmtMoney(spendDailyPace)}/day average across ${totalDays} days.</div>
           </div>`;
       }
@@ -459,20 +462,21 @@ function runDashboard(D) {
     }
 
     el.innerHTML =
-      paceCard('Monthly Ad Spend', spendMTD, MONTHLY_GOALS.spendBudget, fmtMoney, false) +
-      paceCard('Monthly Bookings', bookingsMTD, MONTHLY_GOALS.leadsTarget, (n) => n.toLocaleString(), true) +
+      paceCard('Ad Spend vs budget', spendMTD, MONTHLY_GOALS.spendBudget, fmtMoney, false) +
+      paceCard('Bookings vs target', bookingsMTD, MONTHLY_GOALS.leadsTarget, (n) => n.toLocaleString(), true) +
       headroomCard();
 
     document.getElementById('pacing-note').textContent =
-      (monthComplete ? `${monthLabel}, complete (${totalDays} days)` : `${monthLabel} to date (day ${daysElapsed} of ${totalDays})`)
-      + ` ${MIDDOT} follows the month your date range ends in ${MIDDOT} whole account, not sliced by the campaign filters`;
+      (windowComplete ? `${windowLabel}, complete (${totalDays} days)` : `${windowLabel} to date (day ${daysElapsed} of ${totalDays})`)
+      + ` ${MIDDOT} starts where your date range starts, runs to the end of that month`
+      + ` ${MIDDOT} whole account, not sliced by the campaign filters`;
 
     // Day-by-day trajectory against an ideal straight-line pace, not just
     // the single end-of-month projection above -- this is what actually
     // shows whether a slow start is catching up or falling further behind.
     // The x-axis now runs the full month so a third line can show where the
     // current rate actually leads, not just today's cumulative total.
-    const daysList = Array.from({ length: totalDays }, (_, i) => addDaysStr(monthStart, i));
+    const daysList = Array.from({ length: totalDays }, (_, i) => addDaysStr(windowStart, i));
     const spendByDate = {};
     for (const r of DAILY_SPEND) spendByDate[r.date] = (spendByDate[r.date] || 0) + r.spend;
     const bookingsByDate = {};
@@ -549,7 +553,7 @@ function runDashboard(D) {
     const firstBookingIdx = bookingsActual.findIndex(v => v > 0);
     const cplEl = document.getElementById('pace-trend-cpl');
     if (firstBookingIdx === -1) {
-      cplEl.innerHTML = `<p style="color:var(--ink-3);font-style:italic;margin:8px 0">No bookings recorded in ${escapeHtml(monthLabel)}.</p>`;
+      cplEl.innerHTML = `<p style="color:var(--ink-3);font-style:italic;margin:8px 0">No bookings recorded in ${escapeHtml(windowLabel)}.</p>`;
     } else {
       const cplDates = daysElapsedList.slice(firstBookingIdx);
       const cplActual = cplDates.map((_, i) => spendActual[firstBookingIdx + i] / bookingsActual[firstBookingIdx + i]);
