@@ -306,18 +306,29 @@ function runDashboard(D) {
     // Day-by-day trajectory against an ideal straight-line pace, not just
     // the single end-of-month projection above -- this is what actually
     // shows whether a slow start is catching up or falling further behind.
-    // Only plotted through today: extending the actual line into days that
-    // haven't happened yet would mean inventing them.
-    const daysList = Array.from({ length: daysElapsed }, (_, i) => addDaysStr(monthStart, i));
+    // The x-axis now runs the full month so a third line can show where the
+    // current rate actually leads, not just today's cumulative total.
+    const daysList = Array.from({ length: totalDays }, (_, i) => addDaysStr(monthStart, i));
     const spendByDate = {};
     for (const r of DAILY_SPEND) spendByDate[r.date] = (spendByDate[r.date] || 0) + r.spend;
     const bookingsByDate = {};
     for (const l of LEADS) bookingsByDate[l.generatedDate] = (bookingsByDate[l.generatedDate] || 0) + 1;
 
     let runningSpend = 0;
-    const spendCum = daysList.map(d => { runningSpend += (spendByDate[d] || 0); return runningSpend; });
+    const spendActual = daysList.slice(0, daysElapsed).map(d => { runningSpend += (spendByDate[d] || 0); return runningSpend; });
     let runningBookings = 0;
-    const bookingsCum = daysList.map(d => { runningBookings += (bookingsByDate[d] || 0); return runningBookings; });
+    const bookingsActual = daysList.slice(0, daysElapsed).map(d => { runningBookings += (bookingsByDate[d] || 0); return runningBookings; });
+
+    // Beyond today, continue at today's daily average rather than inventing
+    // new facts -- this is "if the current rate holds," not a forecast that
+    // accounts for creative fatigue, seasonality, or anything changing.
+    // dailyPace is defined so this lands exactly on the last actual point,
+    // no kink where the solid line becomes dashed.
+    const spendDailyPace = daysElapsed ? spendMTD / daysElapsed : 0;
+    const bookingsDailyPace = daysElapsed ? bookingsMTD / daysElapsed : 0;
+    const spendCum = daysList.map((_, i) => i < daysElapsed ? spendActual[i] : spendDailyPace * (i + 1));
+    const bookingsCum = daysList.map((_, i) => i < daysElapsed ? bookingsActual[i] : bookingsDailyPace * (i + 1));
+    const lastActualIdx = daysElapsed - 1;
 
     const spendPace = daysList.map((_, i) => (MONTHLY_GOALS.spendBudget / totalDays) * (i + 1));
     const bookingsPace = daysList.map((_, i) => (MONTHLY_GOALS.leadsTarget / totalDays) * (i + 1));
@@ -325,33 +336,47 @@ function runDashboard(D) {
 
     document.getElementById('pace-trend-spend').innerHTML = svgLines(
       [
-        { values: spendCum, color: 'var(--cat-1)', tooltips: daysList.map((d, i) => `${fmtDate(d)}: ${fmtMoney(spendCum[i])} spent`) },
-        { values: spendPace, color: 'var(--ink-3)', dashedFrom: 0, tooltips: daysList.map((d, i) => `${fmtDate(d)}: ${fmtMoney(spendPace[i])} pace`) },
+        {
+          values: spendCum, color: 'var(--cat-1)', dashedFrom: lastActualIdx,
+          tooltips: daysList.map((d, i) => i < daysElapsed
+            ? `${fmtDate(d)}: ${fmtMoney(spendCum[i])} spent`
+            : `${fmtDate(d)}: ${fmtMoney(spendCum[i])} projected at current daily pace`),
+        },
+        { values: spendPace, color: 'var(--ink-3)', dashedFrom: 0, isReference: true, tooltips: daysList.map((d, i) => `${fmtDate(d)}: ${fmtMoney(spendPace[i])} pace`) },
       ],
       { dates: daysList, valueFmt: fmtMoneyShortPace }
     );
     document.getElementById('pace-trend-leads').innerHTML = svgLines(
       [
-        { values: bookingsCum, color: 'var(--cat-4)', tooltips: daysList.map((d, i) => `${fmtDate(d)}: ${bookingsCum[i]} booked`) },
-        { values: bookingsPace, color: 'var(--ink-3)', dashedFrom: 0, tooltips: daysList.map((d, i) => `${fmtDate(d)}: ${bookingsPace[i].toFixed(1)} pace`) },
+        {
+          values: bookingsCum, color: 'var(--cat-4)', dashedFrom: lastActualIdx,
+          tooltips: daysList.map((d, i) => i < daysElapsed
+            ? `${fmtDate(d)}: ${Math.round(bookingsCum[i])} booked`
+            : `${fmtDate(d)}: ${bookingsCum[i].toFixed(1)} projected at current daily pace`),
+        },
+        { values: bookingsPace, color: 'var(--ink-3)', dashedFrom: 0, isReference: true, tooltips: daysList.map((d, i) => `${fmtDate(d)}: ${bookingsPace[i].toFixed(1)} pace`) },
       ],
       { dates: daysList, valueFmt: (v) => Math.round(v).toString() }
     );
 
     // Cost per lead is undefined until the first booking of the month lands
     // -- trimmed to start there rather than showing a divide-by-zero as $0.
-    const firstBookingIdx = bookingsCum.findIndex(v => v > 0);
+    // Actuals only, not the projected continuation above: a projected CPL
+    // is a ratio of two projections and compounds error fast enough to be
+    // misleading rather than useful.
+    const daysElapsedList = daysList.slice(0, daysElapsed);
+    const firstBookingIdx = bookingsActual.findIndex(v => v > 0);
     const cplEl = document.getElementById('pace-trend-cpl');
     if (firstBookingIdx === -1) {
       cplEl.innerHTML = `<p style="color:var(--ink-3);font-style:italic;margin:8px 0">No bookings recorded yet this month.</p>`;
     } else {
-      const cplDates = daysList.slice(firstBookingIdx);
-      const cplActual = cplDates.map((_, i) => spendCum[firstBookingIdx + i] / bookingsCum[firstBookingIdx + i]);
+      const cplDates = daysElapsedList.slice(firstBookingIdx);
+      const cplActual = cplDates.map((_, i) => spendActual[firstBookingIdx + i] / bookingsActual[firstBookingIdx + i]);
       const cplTarget = MONTHLY_GOALS.spendBudget / MONTHLY_GOALS.leadsTarget;
       cplEl.innerHTML = svgLines(
         [
           { values: cplActual, color: 'var(--cat-2)', tooltips: cplDates.map((d, i) => `${fmtDate(d)}: ${fmtMoney(cplActual[i])}/lead`) },
-          { values: cplDates.map(() => cplTarget), color: 'var(--ink-3)', dashedFrom: 0, tooltips: cplDates.map(() => `${fmtMoney(cplTarget)}/lead target`) },
+          { values: cplDates.map(() => cplTarget), color: 'var(--ink-3)', dashedFrom: 0, isReference: true, tooltips: cplDates.map(() => `${fmtMoney(cplTarget)}/lead target`) },
         ],
         { dates: cplDates, valueFmt: (v) => '$' + v.toFixed(0) }
       );
@@ -811,29 +836,55 @@ function runDashboard(D) {
 
     const parts = series.map(s => {
       const solidIdx = s.dashedFrom != null ? s.dashedFrom : n;
+      // A flat target/pace line recedes behind the metric it's compared
+      // against: thinner, dotted, lower opacity, so it never competes with
+      // the thing being measured. An explicit flag, not dashedFrom === 0 --
+      // an actual-then-projected line also has dashedFrom 0 on day 1 of the
+      // month (only one real point exists yet), and that must not be
+      // mistaken for a reference line with no real data at all.
+      const isReference = !!s.isReference;
       const pts = s.values.map((v, i) => `${(i * stepX).toFixed(1)},${scaleY(v).toFixed(1)}`);
       const solid = pts.slice(0, solidIdx + 1).join(' ');
       const dashed = pts.slice(Math.max(0, solidIdx)).join(' ');
       let out = '';
-      if (solid) out += `<polyline points="${solid}" fill="none" stroke="${s.color}" stroke-width="2"/>`;
-      if (dashed && s.dashedFrom != null) out += `<polyline points="${dashed}" fill="none" stroke="${s.color}" stroke-width="2" stroke-dasharray="3,3" opacity="0.55"/>`;
+      if (isReference) {
+        if (dashed) out += `<polyline points="${dashed}" fill="none" stroke="${s.color}" stroke-width="1.5" stroke-dasharray="1,3" stroke-linecap="round" opacity="0.5"/>`;
+      } else {
+        // Mark exactly where real data ends and a projection takes over --
+        // without this the eye has to guess which point is "today", and
+        // the projected half quietly reads as more certain than it is.
+        if (s.dashedFrom > 0 && s.dashedFrom < n - 1) {
+          const tx = (s.dashedFrom * stepX).toFixed(1);
+          out += `<line x1="${tx}" y1="0" x2="${tx}" y2="${plotH - 1}" stroke="var(--hairline)" stroke-width="1" stroke-dasharray="2,2"/>`;
+        }
+        if (solid) out += `<polyline points="${solid}" fill="none" stroke="${s.color}" stroke-width="2"/>`;
+        // A wider dash than the reference line's dotted style, so the two
+        // never read as the same kind of line where they cross.
+        if (dashed && s.dashedFrom != null) out += `<polyline points="${dashed}" fill="none" stroke="${s.color}" stroke-width="2" stroke-dasharray="5,3" opacity="0.6"/>`;
+      }
       // A marker on every point, not just the last -- with n up around 90
       // for a daily-bucketed range these are necessarily small, but a dot
       // to hover for the exact value beats a bare line with one endpoint.
+      // Skipped for reference lines: a flat target has the same value on
+      // every point, so 30 identical dots is pure clutter with no new
+      // information, the line alone already says "the target".
       const r = n > 40 ? 1.5 : n > 14 ? 2 : 3;
-      s.values.forEach((v, i) => {
-        const cx = (i * stepX).toFixed(1);
-        const cy = scaleY(v).toFixed(1);
-        const title = dates[i] ? `<title>${escapeHtml(fmtAxisDate(dates[i]))}: ${escapeHtml(String(s.tooltips ? s.tooltips[i] : v))}</title>` : '';
-        out += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${s.color}">${title}</circle>`;
-        if (printValues) {
-          // Alternate above/below the point -- consecutive labels sitting
-          // directly on top of each other is the more likely collision than
-          // one from two points apart, since points are evenly spaced.
-          const dy = i % 2 === 0 ? -5 : 11;
-          out += `<text x="${cx}" y="${(scaleY(v) + dy).toFixed(1)}" font-size="8" fill="var(--ink-2)" text-anchor="middle">${escapeHtml(valueFmt(v))}</text>`;
-        }
-      });
+      if (!isReference) {
+        s.values.forEach((v, i) => {
+          const cx = (i * stepX).toFixed(1);
+          const cy = scaleY(v).toFixed(1);
+          const title = dates[i] ? `<title>${escapeHtml(fmtAxisDate(dates[i]))}: ${escapeHtml(String(s.tooltips ? s.tooltips[i] : v))}</title>` : '';
+          out += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${s.color}">${title}</circle>`;
+          if (printValues) {
+            // Alternate above/below the point -- consecutive labels sitting
+            // directly on top of each other is the more likely collision
+            // than one from two points apart, since points are evenly
+            // spaced.
+            const dy = i % 2 === 0 ? -5 : 11;
+            out += `<text x="${cx}" y="${(scaleY(v) + dy).toFixed(1)}" font-size="8" fill="var(--ink-2)" text-anchor="middle">${escapeHtml(valueFmt(v))}</text>`;
+          }
+        });
+      }
       return out;
     }).join('');
     const axis = dates.length ? axisLabels(dates, width) : '';
