@@ -411,17 +411,17 @@ function runDashboard(D) {
     const spendSeries = [
       {
         values: spendCum, color: 'var(--cat-1)', dashedFrom: lastActualIdx,
-        tooltips: daysList.map((d, i) => i < daysElapsed
-          ? `${fmtDate(d)}: ${fmtMoney(spendCum[i])} spent`
-          : `${fmtDate(d)}: ${fmtMoney(spendCum[i])} projected at current daily pace`),
+        tooltips: daysList.map((_, i) => i < daysElapsed
+          ? `${fmtMoney(spendCum[i])} spent`
+          : `${fmtMoney(spendCum[i])} projected at current daily pace`),
       },
-      { values: spendPace, color: 'var(--ink-3)', dashedFrom: 0, isReference: true, tooltips: daysList.map((d, i) => `${fmtDate(d)}: ${fmtMoney(spendPace[i])} pace`) },
+      { values: spendPace, color: 'var(--ink-3)', dashedFrom: 0, isReference: true, tooltips: daysList.map((_, i) => `${fmtMoney(spendPace[i])} on ideal pace`) },
     ];
     // Only worth drawing while budget remains and days remain to spend it.
     if (daysLeft > 0 && budgetLeft > 0) {
       spendSeries.push({
         values: budgetCeiling, color: 'var(--good)', dashedFrom: lastActualIdx, isReference: true,
-        tooltips: daysList.map((d, i) => `${fmtDate(d)}: ${fmtMoney(budgetCeiling[i])} if the full budget is used evenly`),
+        tooltips: daysList.map((_, i) => `${fmtMoney(budgetCeiling[i])} if the full budget is used evenly`),
       });
     }
 
@@ -433,11 +433,11 @@ function runDashboard(D) {
       [
         {
           values: bookingsCum, color: 'var(--cat-4)', dashedFrom: lastActualIdx,
-          tooltips: daysList.map((d, i) => i < daysElapsed
-            ? `${fmtDate(d)}: ${Math.round(bookingsCum[i])} booked`
-            : `${fmtDate(d)}: ${bookingsCum[i].toFixed(1)} projected at current daily pace`),
+          tooltips: daysList.map((_, i) => i < daysElapsed
+            ? `${Math.round(bookingsCum[i])} booked`
+            : `${bookingsCum[i].toFixed(1)} projected at current daily pace`),
         },
-        { values: bookingsPace, color: 'var(--ink-3)', dashedFrom: 0, isReference: true, tooltips: daysList.map((d, i) => `${fmtDate(d)}: ${bookingsPace[i].toFixed(1)} pace`) },
+        { values: bookingsPace, color: 'var(--ink-3)', dashedFrom: 0, isReference: true, tooltips: daysList.map((_, i) => `${bookingsPace[i].toFixed(1)} on ideal pace`) },
       ],
       { dates: daysList, valueFmt: (v) => Math.round(v).toString() }
     );
@@ -458,7 +458,7 @@ function runDashboard(D) {
       const cplTarget = MONTHLY_GOALS.spendBudget / MONTHLY_GOALS.leadsTarget;
       cplEl.innerHTML = svgLines(
         [
-          { values: cplActual, color: 'var(--cat-2)', tooltips: cplDates.map((d, i) => `${fmtDate(d)}: ${fmtMoney(cplActual[i])}/lead`) },
+          { values: cplActual, color: 'var(--cat-2)', tooltips: cplDates.map((_, i) => `${fmtMoney(cplActual[i])}/lead`) },
           { values: cplDates.map(() => cplTarget), color: 'var(--ink-3)', dashedFrom: 0, isReference: true, tooltips: cplDates.map(() => `${fmtMoney(cplTarget)}/lead target`) },
         ],
         { dates: cplDates, valueFmt: (v) => '$' + v.toFixed(0) }
@@ -956,8 +956,8 @@ function runDashboard(D) {
         s.values.forEach((v, i) => {
           const cx = (i * stepX).toFixed(1);
           const cy = scaleY(v).toFixed(1);
-          const title = dates[i] ? `<title>${escapeHtml(fmtAxisDate(dates[i]))}: ${escapeHtml(String(s.tooltips ? s.tooltips[i] : v))}</title>` : '';
-          out += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${s.color}">${title}</circle>`;
+          // Hover text lives on the bands below, not here: see the note there.
+          out += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${s.color}"/>`;
           if (printValues) {
             // Alternate above/below the point -- consecutive labels sitting
             // directly on top of each other is the more likely collision
@@ -970,8 +970,28 @@ function runDashboard(D) {
       }
       return out;
     }).join('');
+
+    // One full-height hover target per date, rather than a title on each
+    // marker. Two reasons: a 2px dot is far too small to reliably land a
+    // mouse on, and a per-marker title can only describe its own series, so
+    // the target and projection lines -- which carry no markers -- had no
+    // reachable value at all. A band covers every line at that date, which
+    // is also the comparison worth reading.
+    const bands = dates.length ? dates.map((d, i) => {
+      const cx = i * stepX;
+      const left = Math.max(0, cx - stepX / 2);
+      const right = Math.min(width, cx + stepX / 2);
+      const lines = series
+        .map(s => (s.tooltips && s.tooltips[i] != null)
+          ? s.tooltips[i]
+          : (valueFmt ? valueFmt(s.values[i]) : String(s.values[i])))
+        .filter(Boolean);
+      const text = [fmtAxisDate(d), ...lines].join('\n');
+      return `<rect x="${left.toFixed(1)}" y="0" width="${Math.max(right - left, 1).toFixed(1)}" height="${plotH.toFixed(1)}" fill="transparent" pointer-events="all"><title>${escapeHtml(text)}</title></rect>`;
+    }).join('') : '';
+
     const axis = dates.length ? axisLabels(dates, width) : '';
-    return `<svg viewBox="0 0 ${width} ${height + AXIS_H}" role="img">${parts}<line x1="0" y1="${plotH - 1}" x2="${width}" y2="${plotH - 1}" stroke="var(--hairline)" stroke-width="1"/><g transform="translate(0,${plotH})">${axis}</g></svg>`;
+    return `<svg viewBox="0 0 ${width} ${height + AXIS_H}" role="img">${parts}<line x1="0" y1="${plotH - 1}" x2="${width}" y2="${plotH - 1}" stroke="var(--hairline)" stroke-width="1"/>${bands}<g transform="translate(0,${plotH})">${axis}</g></svg>`;
   }
 
   // Buckets the selected range for the trend charts -- daily if the range
