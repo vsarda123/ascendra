@@ -33,7 +33,10 @@ function runDashboard(D) {
   // Update both at the start of each month.
   const MONTHLY_GOALS = { spendBudget: 4000, leadsTarget: 50 };
 
-  const state = { preset: 'last90', from: null, to: null, campaign: 'all', audience: 'all', creative: 'all', landingPage: 'all' };
+  // compare defaults to the preceding period rather than off: the Ad Spend
+  // card already reported that delta before this control existed, so
+  // defaulting to 'none' would have quietly removed a number people read.
+  const state = { preset: 'last90', from: null, to: null, compare: 'prev', campaign: 'all', audience: 'all', creative: 'all', landingPage: 'all' };
   // Highest spend first: with no settlement data to rank on, the money going
   // out is the thing worth looking at from the top of the table down.
   const sortState = { key: 'spend', dir: -1 };
@@ -117,6 +120,64 @@ function runDashboard(D) {
       case 'lifetime': return { from: EARLIEST, to: TODAY };
       default: return { from: clampDate(addDaysStr(TODAY, -89)), to: TODAY };
     }
+  }
+
+  // ----------------------------------------------------- compare periods
+  // Shifting by whole months has to clamp the day: 31 March back one month
+  // is not 31 February. Landing on the last day of the shorter month is the
+  // only reading that keeps the range the same shape.
+  function shiftMonths(dateStr, n) {
+    const d = new Date(dateStr + 'T00:00:00Z');
+    const y = d.getUTCFullYear();
+    const m = d.getUTCMonth();
+    const lastOfTarget = new Date(Date.UTC(y, m + n + 1, 0)).getUTCDate();
+    return new Date(Date.UTC(y, m + n, Math.min(d.getUTCDate(), lastOfTarget)))
+      .toISOString().slice(0, 10);
+  }
+
+  const COMPARE_LABELS = {
+    prev: 'preceding period',
+    prevmonth: 'same dates last month',
+    lastyear: 'same dates last year',
+  };
+
+  // The window the current range is measured against. Deliberately NOT
+  // clamped to EARLIEST: a comparison window that reaches back before the
+  // data starts has to be reported as unavailable, and clamping it would
+  // quietly shorten it into a shorter window that looks like real data.
+  function compareRange() {
+    if (state.compare === 'none' || !state.from || !state.to) return null;
+    if (state.compare === 'prev') {
+      const to = addDaysStr(state.from, -1);
+      return { from: addDaysStr(to, -(daysCount(state.from, state.to) - 1)), to };
+    }
+    const back = state.compare === 'lastyear' ? -12 : -1;
+    return { from: shiftMonths(state.from, back), to: shiftMonths(state.to, back) };
+  }
+
+  // Whether that window is actually covered by the data we hold.
+  function compareAvailable(range) {
+    return !!range && range.from >= EARLIEST;
+  }
+
+  // One period-over-period delta. lowerIsBetter flips which direction reads
+  // as good: a falling cost per lead is progress, a falling booking count
+  // is not, and colouring both the same way would be actively misleading.
+  function deltaLine(cur, prev, fmt, lowerIsBetter) {
+    if (prev == null) return `<div class="cmp muted">no comparison period in the data</div>`;
+    if (cur == null) return `<div class="cmp muted">was ${fmt(prev)}</div>`;
+    // A change from zero has no meaningful percentage. Report the direction
+    // and the pair rather than dividing by it.
+    if (!prev) {
+      return cur
+        ? `<div class="cmp ${lowerIsBetter ? 'bad' : 'good'}">${UP_TRI} up from none</div>`
+        : `<div class="cmp muted">none, same as before</div>`;
+    }
+    const pct = ((cur - prev) / prev) * 100;
+    const flat = Math.abs(pct) < 0.5;
+    const cls = flat ? 'muted' : (lowerIsBetter ? pct < 0 : pct > 0) ? 'good' : 'bad';
+    const move = flat ? 'flat' : `${pct > 0 ? UP_TRI : DOWN_TRI} ${Math.abs(pct).toFixed(0)}%`;
+    return `<div class="cmp ${cls}">${move} vs ${fmt(prev)}</div>`;
   }
 
   function applyPreset(preset) {
@@ -228,6 +289,13 @@ function runDashboard(D) {
     syncCustomInputs();
     updateRangeReadout();
 
+    const compareEl = document.getElementById('f-compare');
+    compareEl.value = state.compare;
+    compareEl.onchange = (e) => {
+      state.compare = e.target.value;
+      renderAll();
+    };
+
     ['campaign', 'audience', 'creative', 'landingpage'].forEach(key => {
       const id = 'f-' + key;
       document.getElementById(id).onchange = (e) => {
@@ -237,17 +305,19 @@ function runDashboard(D) {
       };
     });
     document.getElementById('reset-filters').onclick = () => {
-      Object.assign(state, { preset: 'last90', campaign: 'all', audience: 'all', creative: 'all', landingPage: 'all' });
+      Object.assign(state, { preset: 'last90', compare: 'none', campaign: 'all', audience: 'all', creative: 'all', landingPage: 'all' });
       initFilterBar();
       renderAll();
     };
   }
 
   // ------------------------------------------------------------- pacing
-  // Whole-account, calendar-month-to-date, deliberately ignoring the filter
-  // bar above -- a $4,000 monthly budget or a 50-booking target means
-  // nothing once sliced down to one campaign, so this reads DAILY_SPEND/
-  // LEADS directly rather than through spendFor()/leadsFor().
+  // Whole-account, one calendar month at a time. The month follows the end
+  // of the selected date range, but the campaign/audience/creative filters
+  // are still ignored deliberately -- a $4,000 monthly budget or a
+  // 50-booking target means nothing once sliced down to one campaign, so
+  // this reads DAILY_SPEND/LEADS directly rather than through spendFor()/
+  // leadsFor().
   function daysInMonthOf(dateStr) {
     const d = new Date(dateStr + 'T00:00:00Z');
     return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
@@ -261,15 +331,26 @@ function runDashboard(D) {
     const el = document.getElementById('pacing-grid');
     if (!el) return;
 
-    const monthStart = firstOfMonthOf(TODAY);
-    const daysElapsed = new Date(TODAY + 'T00:00:00Z').getUTCDate();
-    const totalDays = daysInMonthOf(TODAY);
+    // The month shown is the one the selected range ends in, so picking a
+    // date in July shows July rather than always the current month.
+    const anchor = state.to || TODAY;
+    const monthStart = firstOfMonthOf(anchor);
+    const totalDays = daysInMonthOf(anchor);
+    const monthEnd = addDaysStr(monthStart, totalDays - 1);
+    // A month that has already finished has data for all of it; the current
+    // one only up to today. Everything below keys off this rather than
+    // TODAY, which would read a past month as barely started.
+    const lastDay = monthEnd < TODAY ? monthEnd : TODAY;
+    const daysElapsed = new Date(lastDay + 'T00:00:00Z').getUTCDate();
     const daysLeft = totalDays - daysElapsed;
+    const monthComplete = daysLeft === 0;
+    const monthLabel = new Date(anchor + 'T00:00:00Z')
+      .toLocaleDateString('en-AU', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 
     const spendMTD = DAILY_SPEND
-      .filter(r => r.date >= monthStart && r.date <= TODAY)
+      .filter(r => r.date >= monthStart && r.date <= lastDay)
       .reduce((s, r) => s + r.spend, 0);
-    const bookingsMTD = LEADS.filter(l => l.generatedDate >= monthStart && l.generatedDate <= TODAY).length;
+    const bookingsMTD = LEADS.filter(l => l.generatedDate >= monthStart && l.generatedDate <= lastDay).length;
 
     const spendDailyPace = daysElapsed ? spendMTD / daysElapsed : 0;
     const bookingsDailyPace = daysElapsed ? bookingsMTD / daysElapsed : 0;
@@ -292,16 +373,27 @@ function runDashboard(D) {
       const status = higherIsBetter
         ? (pctProjected >= 100 ? 'good' : pctProjected >= 80 ? 'warning' : 'critical')
         : (pctProjected <= 100 ? 'good' : pctProjected <= 115 ? 'warning' : 'critical');
-      const statusText = higherIsBetter
-        ? { good: 'on pace to hit target', warning: 'tracking behind target', critical: 'well behind target' }[status]
-        : { good: 'on pace, within budget', warning: 'tracking slightly over budget', critical: 'tracking well over budget' }[status];
+      // A finished month is reported in the past tense: "on pace to hit
+      // target" about a month that has already ended reads as a forecast
+      // for something that cannot change any more.
+      const statusText = monthComplete
+        ? (higherIsBetter
+          ? { good: 'target met', warning: 'fell short of target', critical: 'well short of target' }[status]
+          : { good: 'landed within budget', warning: 'came in slightly over budget', critical: 'came in well over budget' }[status])
+        : (higherIsBetter
+          ? { good: 'on pace to hit target', warning: 'tracking behind target', critical: 'well behind target' }[status]
+          : { good: 'on pace, within budget', warning: 'tracking slightly over budget', critical: 'tracking well over budget' }[status]);
+
+      const tail = monthComplete
+        ? `finished at ${fmt(Math.round(actual))}`
+        : `projected ${fmt(Math.round(projected))} by month end ${MIDDOT} ${daysLeft} day${daysLeft === 1 ? '' : 's'} left`;
 
       return `
         <div class="trend-card">
           <h5>${label}</h5>
           <div class="pace-value">${fmt(actual)} <span class="pace-of">of ${fmt(goal)}</span></div>
           <div class="pace-bar"><div class="pace-fill ${status}" style="width:${Math.min(100, pctActual).toFixed(1)}%"></div></div>
-          <div class="pace-note"><span class="status-dot ${status}"></span>${statusText} ${MIDDOT} projected ${fmt(Math.round(projected))} by month end ${MIDDOT} ${daysLeft} day${daysLeft === 1 ? '' : 's'} left</div>
+          <div class="pace-note"><span class="status-dot ${status}"></span>${statusText} ${MIDDOT} ${tail}</div>
         </div>`;
     }
 
@@ -311,12 +403,18 @@ function runDashboard(D) {
     // daily budget set in Meta -- days before a campaign launched drag it
     // down -- so it is labelled as an average everywhere it appears.
     function headroomCard() {
+      // Nothing to pace once the month is over -- report how it finished
+      // instead, which is the only question left about it.
       if (sustainableDaily == null) {
+        const under = MONTHLY_GOALS.spendBudget - spendMTD;
+        const verdict = under >= 0
+          ? `${fmtMoney(under)} under budget`
+          : `${fmtMoney(-under)} over budget`;
         return `
           <div class="trend-card wide">
             <h5>Daily budget headroom</h5>
-            <div class="pace-value">${DASH}</div>
-            <div class="pace-note">Last day of the month ${MIDDOT} no remaining days to pace against.</div>
+            <div class="pace-value">${DASH} <span class="pace-of">${monthLabel} is complete</span></div>
+            <div class="pace-note"><span class="status-dot ${under >= 0 ? 'good' : 'critical'}"></span>Finished at ${fmtMoney(spendMTD)} of ${fmtMoney(MONTHLY_GOALS.spendBudget)} ${MIDDOT} ${verdict} ${MIDDOT} ${fmtMoney(spendDailyPace)}/day average across ${totalDays} days.</div>
           </div>`;
       }
 
@@ -366,8 +464,8 @@ function runDashboard(D) {
       headroomCard();
 
     document.getElementById('pacing-note').textContent =
-      `${new Date(TODAY + 'T00:00:00Z').toLocaleDateString('en-AU', { month: 'long', year: 'numeric', timeZone: 'UTC' })} to date `
-      + `(day ${daysElapsed} of ${totalDays}) ${MIDDOT} whole account, not affected by the filters above`;
+      (monthComplete ? `${monthLabel}, complete (${totalDays} days)` : `${monthLabel} to date (day ${daysElapsed} of ${totalDays})`)
+      + ` ${MIDDOT} follows the month your date range ends in ${MIDDOT} whole account, not sliced by the campaign filters`;
 
     // Day-by-day trajectory against an ideal straight-line pace, not just
     // the single end-of-month projection above -- this is what actually
@@ -451,7 +549,7 @@ function runDashboard(D) {
     const firstBookingIdx = bookingsActual.findIndex(v => v > 0);
     const cplEl = document.getElementById('pace-trend-cpl');
     if (firstBookingIdx === -1) {
-      cplEl.innerHTML = `<p style="color:var(--ink-3);font-style:italic;margin:8px 0">No bookings recorded yet this month.</p>`;
+      cplEl.innerHTML = `<p style="color:var(--ink-3);font-style:italic;margin:8px 0">No bookings recorded in ${escapeHtml(monthLabel)}.</p>`;
     } else {
       const cplDates = daysElapsedList.slice(firstBookingIdx);
       const cplActual = cplDates.map((_, i) => spendActual[firstBookingIdx + i] / bookingsActual[firstBookingIdx + i]);
@@ -467,71 +565,149 @@ function runDashboard(D) {
   }
 
   // ------------------------------------------------------------------ KPIs
-  function renderKpisMarketing() {
-    const { from, to } = state;
-    const rangeLen = daysCount(from, to);
-    const prevTo = addDaysStr(from, -1);
-    const prevFrom = addDaysStr(prevTo, -(rangeLen - 1));
-    const prevAvailable = prevFrom >= EARLIEST;
-
-    const curSpendRows = spendFor(from, to);
-    const sum = (rows, key) => rows.reduce((s, r) => s + (r[key] || 0), 0);
-
-    const adSpend = sum(curSpendRows, 'spend');
-    const impressions = sum(curSpendRows, 'impressions');
-    const reach = sum(curSpendRows, 'reach');
+  // Every ad-side metric for one window, derived the same way for the
+  // current and comparison periods so the two cannot drift apart.
+  function adMetrics(from, to) {
+    const rows = spendFor(from, to);
+    const sum = (key) => rows.reduce((s, r) => s + (r[key] || 0), 0);
+    const spend = sum('spend');
+    const impressions = sum('impressions');
+    const reach = sum('reach');
     // Link clicks, not the raw `clicks` total -- `clicks` counts every click
     // anywhere on the ad, including likes, comments and profile taps, so it
     // overstates how many people actually set off toward the site.
-    const linkClicks = sum(curSpendRows, 'inlineLinkClicks');
-    const outbound = sum(curSpendRows, 'outboundClicks');
-    const videoPlays = sum(curSpendRows, 'videoPlays');
+    const linkClicks = sum('inlineLinkClicks');
+    const outbound = sum('outboundClicks');
+    const videoPlays = sum('videoPlays');
+    return {
+      spend, impressions, reach, linkClicks, outbound, videoPlays,
+      ctr: impressions ? (linkClicks / impressions) * 100 : null,
+      cpc: linkClicks ? spend / linkClicks : null,
+      cpm: impressions ? (spend / impressions) * 1000 : null,
+      frequency: reach ? impressions / reach : null,
+      hookRate: impressions ? (videoPlays / impressions) * 100 : null,
+      // How many of the people who clicked in Meta actually left for the site.
+      clickThrough: linkClicks ? (outbound / linkClicks) * 100 : null,
+    };
+  }
 
-    const ctr = impressions ? (linkClicks / impressions) * 100 : null;
-    const cpc = linkClicks ? adSpend / linkClicks : null;
-    const cpm = impressions ? (adSpend / impressions) * 1000 : null;
-    const frequency = reach ? impressions / reach : null;
-    const hookRate = impressions ? (videoPlays / impressions) * 100 : null;
-    // How many of the people who clicked in Meta actually left for the site.
-    const clickThrough = linkClicks ? (outbound / linkClicks) * 100 : null;
+  function renderKpisMarketing() {
+    const { from, to } = state;
+    const rangeLen = daysCount(from, to);
+    const cmp = compareRange();
+    const cmpOk = compareAvailable(cmp);
 
-    const prevSpend = prevAvailable ? sum(spendFor(prevFrom, prevTo), 'spend') : null;
-    const spendDeltaPct = prevSpend ? ((adSpend - prevSpend) / prevSpend) * 100 : null;
+    const cur = adMetrics(from, to);
+    const prev = cmpOk ? adMetrics(cmp.from, cmp.to) : null;
+    const d = (key, fmt, lowerIsBetter) => state.compare === 'none'
+      ? ''
+      : deltaLine(cur[key], prev ? prev[key] : null, fmt, lowerIsBetter);
+
+    const { impressions, reach, linkClicks, outbound, videoPlays,
+      ctr, cpc, cpm, frequency, hookRate, clickThrough } = cur;
 
     document.getElementById('kpi-marketing').innerHTML = `
       <div class="kpi">
         <div class="l">Ad Spend</div>
-        <div class="v">${fmtMoney(adSpend)}</div>
-        <div class="d ${spendDeltaPct > 0 ? 'bad' : spendDeltaPct < 0 ? 'good' : ''}">${prevSpend != null ? (spendDeltaPct >= 0 ? UP_TRI + ' ' : DOWN_TRI + ' ') + Math.abs(spendDeltaPct).toFixed(0) + `% vs ${fmtMoney(prevSpend)} prior` : 'no earlier period available'}</div>
+        <div class="v">${fmtMoney(cur.spend)}</div>
+        <div class="d">${rangeLen} day${rangeLen === 1 ? '' : 's'} ${MIDDOT} ${fmtMoney(cur.spend / rangeLen)}/day</div>
+        ${d('spend', fmtMoney, true)}
       </div>
       <div class="kpi">
         <div class="l">Impressions</div>
         <div class="v">${impressions.toLocaleString()}</div>
         <div class="d">${reach ? `${reach.toLocaleString()} reached ${MIDDOT} ${frequency.toFixed(1)}x frequency` : 'reach not reported'}</div>
+        ${d('impressions', (n) => n.toLocaleString(), false)}
       </div>
       <div class="kpi">
         <div class="l">Link CTR</div>
         <div class="v">${ctr != null ? ctr.toFixed(2) : DASH}<small>%</small></div>
         <div class="d">${linkClicks.toLocaleString()} link clicks</div>
+        ${d('ctr', (n) => fmtPct(n, 2), false)}
       </div>
       <div class="kpi">
         <div class="l">Cost per Link Click</div>
         <div class="v">${cpc != null ? '$' + cpc.toFixed(2) : DASH}</div>
         <div class="d">${cpm != null ? '$' + cpm.toFixed(2) + ' CPM' : DASH}</div>
+        ${d('cpc', (n) => '$' + n.toFixed(2), true)}
       </div>
       <div class="kpi">
         <div class="l">Hook Rate</div>
         <div class="v">${hookRate != null && videoPlays ? hookRate.toFixed(1) : DASH}<small>%</small></div>
         <div class="d">${videoPlays ? videoPlays.toLocaleString() + ' 3-sec plays' : 'no video ads in range'}</div>
+        ${videoPlays ? d('hookRate', (n) => fmtPct(n, 1), false) : ''}
       </div>
       <div class="kpi">
         <div class="l">Click ${DASH_EN} Site Follow-through</div>
         <div class="v">${clickThrough != null && outbound ? clickThrough.toFixed(0) : DASH}<small>%</small></div>
         <div class="d">${outbound ? outbound.toLocaleString() + ' left Meta for the site' : 'outbound clicks not reported'}</div>
+        ${outbound ? d('clickThrough', (n) => fmtPct(n, 0), false) : ''}
       </div>
     `;
     document.getElementById('marketing-week-note').textContent =
-      `${fmtDate(from)} ${DASH_EN} ${fmtDate(to)} (${rangeLen} day${rangeLen === 1 ? '' : 's'})${prevAvailable ? ` ${MIDDOT} vs ${fmtDate(prevFrom)} ${DASH_EN} ${fmtDate(prevTo)}` : ''}`;
+      `${fmtDate(from)} ${DASH_EN} ${fmtDate(to)} (${rangeLen} day${rangeLen === 1 ? '' : 's'})` + compareNote(cmp, cmpOk);
+  }
+
+  // The handful of numbers the question "are we growing?" actually turns
+  // on, both periods side by side. The KPI cards below carry the same
+  // deltas, but scattered one per card and mixed in with diagnostics --
+  // this puts the money, the leads and the cost of a lead in one line.
+  function renderCompareSummary() {
+    const grid = document.getElementById('compare-summary');
+    if (!grid) return;
+    const section = grid.closest('section');
+    const note = document.getElementById('compare-note');
+
+    if (state.compare === 'none') { section.style.display = 'none'; return; }
+    section.style.display = '';
+
+    const { from, to } = state;
+    const cmp = compareRange();
+    const cmpOk = compareAvailable(cmp);
+
+    note.textContent = `${fmtDate(from)} ${DASH_EN} ${fmtDate(to)}` + compareNote(cmp, cmpOk)
+      + ` ${MIDDOT} respects the campaign filters above`;
+
+    if (!cmpOk) {
+      grid.innerHTML = `<div class="unattr">The ${COMPARE_LABELS[state.compare]} starts before ${fmtDate(EARLIEST)}, which is as far back as the data goes, so there is nothing to compare against.</div>`;
+      return;
+    }
+
+    const curAd = adMetrics(from, to);
+    const prevAd = adMetrics(cmp.from, cmp.to);
+    const curJ = journeyMetrics(from, to);
+    const prevJ = journeyMetrics(cmp.from, cmp.to);
+
+    // lowerIsBetter on spend and cost per lead only: more spend is not a
+    // win on a fixed budget, and a cheaper lead always is.
+    const rows = [
+      { label: 'Ad Spend', cur: curAd.spend, prev: prevAd.spend, fmt: fmtMoney, lowerIsBetter: true },
+      { label: 'Bookings', cur: curJ.booked, prev: prevJ.booked, fmt: (n) => n.toLocaleString(), lowerIsBetter: false },
+      { label: 'Cost per Lead', cur: curJ.costPerLead, prev: prevJ.costPerLead, fmt: fmtMoney, lowerIsBetter: true },
+      { label: 'Guide Downloads', cur: curJ.downloads, prev: prevJ.downloads, fmt: (n) => n.toLocaleString(), lowerIsBetter: false },
+      { label: 'Link Clicks', cur: curAd.linkClicks, prev: prevAd.linkClicks, fmt: (n) => n.toLocaleString(), lowerIsBetter: false },
+    ];
+
+    grid.innerHTML = `<div class="kpi-grid five">` + rows.map(r => `
+      <div class="kpi">
+        <div class="l">${r.label}</div>
+        <div class="v">${r.cur == null ? DASH : r.fmt(r.cur)}</div>
+        <div class="d">was ${r.prev == null ? DASH : r.fmt(r.prev)}</div>
+        ${deltaLine(r.cur, r.prev, r.fmt, r.lowerIsBetter)}
+      </div>`).join('') + `</div>`;
+  }
+
+  // The same trailing clause on every section that shows a comparison, so
+  // "vs what?" is answerable without scrolling back to the filter bar.
+  function compareNote(cmp, cmpOk) {
+    if (state.compare === 'none') return '';
+    if (!cmpOk) return ` ${MIDDOT} no data as far back as the ${COMPARE_LABELS[state.compare]}`;
+    // A month-shifted window still overlaps a long range: "last 90 days"
+    // against "same dates last month" shares about 60 of them, and a delta
+    // between two windows that share most of their days says very little.
+    const overlap = cmp.to >= state.from;
+    return ` ${MIDDOT} vs ${fmtDate(cmp.from)} ${DASH_EN} ${fmtDate(cmp.to)} (${COMPARE_LABELS[state.compare]})`
+      + (overlap ? ` ${MIDDOT} these windows overlap, so the change reads smaller than the real difference` : '');
   }
 
   function mostRecentMaturedCohortWeek(from, to) {
@@ -545,6 +721,27 @@ function runDashboard(D) {
   // Downloads and bookings are deliberately separate numbers. A guide
   // download is not a lead; cost per lead divides spend by booked meetings,
   // which is a far smaller denominator and a far higher, truer figure.
+  function journeyMetrics(from, to) {
+    const spend = spendFor(from, to).reduce((s, r) => s + r.spend, 0);
+    const downloads = optinsFor(from, to).length;
+    const bookings = leadsFor(from, to);
+    const booked = bookings.length;
+
+    // Attendance is only meaningful over bookings where someone actually
+    // recorded an outcome. Dividing by all bookings would read every blank
+    // cell as a no-show.
+    const withOutcome = bookings.filter(b => b.attendanceRecorded).length;
+    const attended = bookings.filter(b => b.attendanceRecorded && b.attended).length;
+
+    return {
+      spend, downloads, booked, withOutcome, attended,
+      costPerDownload: downloads ? spend / downloads : null,
+      costPerLead: booked ? spend / booked : null,
+      downloadToBooking: downloads ? (booked / downloads) * 100 : null,
+      attendanceRate: withOutcome ? (attended / withOutcome) * 100 : null,
+    };
+  }
+
   function renderKpisJourney() {
     const { from, to } = state;
     const grid = document.getElementById('kpi-journey');
@@ -557,55 +754,56 @@ function runDashboard(D) {
       return;
     }
 
-    const spend = spendFor(from, to).reduce((s, r) => s + r.spend, 0);
-    const downloads = optinsFor(from, to).length;
-    const bookings = leadsFor(from, to);
-    const booked = bookings.length;
+    const cmp = compareRange();
+    const cmpOk = compareAvailable(cmp);
+    const cur = journeyMetrics(from, to);
+    const prev = cmpOk ? journeyMetrics(cmp.from, cmp.to) : null;
+    const d = (key, fmt, lowerIsBetter) => state.compare === 'none'
+      ? ''
+      : deltaLine(cur[key], prev ? prev[key] : null, fmt, lowerIsBetter);
 
-    const costPerDownload = downloads ? spend / downloads : null;
-    const costPerLead = booked ? spend / booked : null;
-    const downloadToBooking = downloads ? (booked / downloads) * 100 : null;
-
-    // Attendance is only meaningful over bookings where someone actually
-    // recorded an outcome. Dividing by all bookings would read every blank
-    // cell as a no-show.
-    const withOutcome = bookings.filter(b => b.attendanceRecorded);
-    const attended = withOutcome.filter(b => b.attended).length;
-    const attendanceRate = withOutcome.length ? (attended / withOutcome.length) * 100 : null;
+    const { downloads, booked, costPerDownload, costPerLead, downloadToBooking,
+      attendanceRate, withOutcome, attended } = cur;
 
     grid.innerHTML = `
       <div class="kpi">
         <div class="l">Guide Downloads</div>
         <div class="v">${downloads.toLocaleString()}</div>
         <div class="d">${costPerDownload != null ? fmtMoney(costPerDownload) + ' each' : 'no spend in range'}</div>
+        ${d('downloads', (n) => n.toLocaleString(), false)}
       </div>
       <div class="kpi">
         <div class="l">Qualified Leads (booked)</div>
         <div class="v">${booked.toLocaleString()}</div>
         <div class="d">meetings booked, not downloads</div>
+        ${d('booked', (n) => n.toLocaleString(), false)}
       </div>
       <div class="kpi">
         <div class="l">Download ${DASH_EN} Booking</div>
         <div class="v">${downloadToBooking != null ? downloadToBooking.toFixed(1) : DASH}<small>%</small></div>
         <div class="d">${downloads ? `${booked} of ${downloads.toLocaleString()} downloads booked` : DASH}</div>
+        ${downloads ? d('downloadToBooking', (n) => fmtPct(n, 1), false) : ''}
       </div>
       <div class="kpi">
         <div class="l">Cost per Qualified Lead</div>
         <div class="v">${fmtMoney(costPerLead)}</div>
         <div class="note">spend / booked meetings</div>
+        ${d('costPerLead', fmtMoney, true)}
       </div>
       <div class="kpi">
         <div class="l">Attendance Rate</div>
         <div class="v">${attendanceRate != null ? attendanceRate.toFixed(0) : DASH}<small>%</small></div>
-        <div class="d">${withOutcome.length
-          ? `${attended} of ${withOutcome.length} with an outcome recorded`
+        <div class="d">${withOutcome
+          ? `${attended} of ${withOutcome} with an outcome recorded`
           : 'no attendance recorded on any booking'}</div>
+        ${withOutcome ? d('attendanceRate', (n) => fmtPct(n, 0), false) : ''}
       </div>
     `;
 
     const unattributed = ATTRIBUTION ? ATTRIBUTION.bookings - ATTRIBUTION.bookingsAttributed : null;
     document.getElementById('journey-week-note').textContent =
       `${fmtDate(from)} ${DASH_EN} ${fmtDate(to)}`
+      + compareNote(cmp, cmpOk)
       + (unattributed ? ` ${MIDDOT} ${unattributed} of ${ATTRIBUTION.bookings} bookings carry no campaign, so cost per lead counts spend against the attributed ones only` : '');
   }
 
@@ -1174,7 +1372,7 @@ function runDashboard(D) {
   // Each section runs independently -- a bug in, say, the funnel shouldn't
   // also blank out the KPI tiles and table that would otherwise render fine.
   function renderAll() {
-    const sections = [renderMonthlyPacing, renderKpisMarketing, renderKpisJourney, renderUnattributed, renderFunnel, renderTrend, renderCampaignSpend, renderBookingHeatmap, renderTable];
+    const sections = [renderMonthlyPacing, renderCompareSummary, renderKpisMarketing, renderKpisJourney, renderUnattributed, renderFunnel, renderTrend, renderCampaignSpend, renderBookingHeatmap, renderTable];
     for (const fn of sections) {
       try { fn(); } catch (err) { showFatalError(err); }
     }

@@ -49,6 +49,14 @@
       <label>To <input type="date" id="f-to"></label>
     </div>
     <span class="range-readout" id="range-readout"></span>
+    <label>Compare to
+      <select id="f-compare">
+        <option value="none">No comparison</option>
+        <option value="prev" selected>Preceding period</option>
+        <option value="prevmonth">Same dates last month</option>
+        <option value="lastyear">Same dates last year</option>
+      </select>
+    </label>
     <label>Campaign <select id="f-campaign"></select></label>
     <label>Audience <select id="f-audience"></select></label>
     <label>Creative <select id="f-creative"></select></label>
@@ -89,6 +97,12 @@
       </div>
     </div>
   </div>
+</section>
+
+<section>
+  <h2 class="sh">Growth &mdash; how this period compares</h2>
+  <p class="sh-note" id="compare-note"></p>
+  <div id="compare-summary"></div>
 </section>
 
 <section>

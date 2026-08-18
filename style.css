@@ -136,6 +136,12 @@ h2.sh { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spa
 .kpi .d.good { color: var(--good-text); }
 .kpi .d.bad { color: var(--critical); }
 .kpi .note { font-size: 10.5px; color: var(--ink-3); margin-top: 6px; font-style: italic; }
+/* Period-over-period delta. Sits below the diagnostic line rather than
+   replacing it, so turning comparison on never costs you a number. */
+.kpi .cmp { font-size: 11.5px; margin-top: 5px; font-variant-numeric: tabular-nums; }
+.kpi .cmp.good { color: var(--good-text); }
+.kpi .cmp.bad { color: var(--critical); }
+.kpi .cmp.muted { color: var(--ink-3); }
 
 .unattr {
   margin: -6px 0 22px; padding: 10px 14px; border-radius: 8px;
