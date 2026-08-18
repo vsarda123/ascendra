@@ -23,7 +23,10 @@ window.renderDashboard = function (D) {
 function runDashboard(D) {
   const { TODAY, EARLIEST, MATURITY_DAYS, DAILY_SPEND, LEADS } = D;
   const OPTINS = D.OPTINS || [];
-  const ATTRIBUTION = D.ATTRIBUTION || null;
+  // D.ATTRIBUTION is deliberately not read: it reports account-wide
+  // attribution counts, and every place that used to show them now derives
+  // the same split from each booking's own channel, so it stays correct
+  // under the date and campaign filters instead of quietly ignoring them.
 
   // This month's plan, entered by hand -- Meta has no concept of "our
   // monthly budget" or "our lead target", so there's nothing to read this
@@ -211,6 +214,14 @@ function runDashboard(D) {
   function spendFor(from, to) {
     return DAILY_SPEND.filter(r => r.date >= from && r.date <= to && rowMatchesFilters(r));
   }
+  // A booking an ad plausibly produced: tied to a campaign, or tagged as
+  // paid traffic without saying which campaign. Organic bookings (email,
+  // Linktree, referrals) and rows with no channel recorded are not -- they
+  // are real bookings, but no ad spend bought them, so counting them
+  // against ad spend makes every cost-per-lead figure look better than it
+  // is. See the channel column in supabase-migration.sql.
+  const isPaidBooking = (l) => l.channel === 'paid-attributed' || l.channel === 'paid-unattributed';
+
   function optinsFor(from, to) {
     return OPTINS.filter(o =>
       o.generatedDate >= from && o.generatedDate <= to &&
@@ -353,7 +364,14 @@ function runDashboard(D) {
     const spendMTD = DAILY_SPEND
       .filter(r => r.date >= windowStart && r.date <= lastDay)
       .reduce((s, r) => s + r.spend, 0);
-    const bookingsMTD = LEADS.filter(l => l.generatedDate >= windowStart && l.generatedDate <= lastDay).length;
+    // Every booking in the window, paid or not: an organic booking is a
+    // real booking and belongs in the total. The split below is what says
+    // how many of them the ad budget beside it can claim any credit for.
+    const windowBookings = LEADS.filter(l => l.generatedDate >= windowStart && l.generatedDate <= lastDay);
+    const bookingsMTD = windowBookings.length;
+    const paidMTD = windowBookings.filter(isPaidBooking).length;
+    const organicMTD = windowBookings.filter(l => l.channel === 'organic').length;
+    const unclassifiedMTD = bookingsMTD - paidMTD - organicMTD;
 
     const spendDailyPace = daysElapsed ? spendMTD / daysElapsed : 0;
     const bookingsDailyPace = daysElapsed ? bookingsMTD / daysElapsed : 0;
@@ -367,7 +385,7 @@ function runDashboard(D) {
 
     // higherIsBetter: spend wants to land AT or UNDER goal; bookings want to
     // land AT or OVER goal. Same math, opposite "good" direction.
-    function paceCard(label, actual, goal, fmt, higherIsBetter) {
+    function paceCard(label, actual, goal, fmt, higherIsBetter, extra) {
       const pctActual = goal ? (actual / goal) * 100 : 0;
       const dailyPace = daysElapsed ? actual / daysElapsed : 0;
       const projected = dailyPace * totalDays;
@@ -397,6 +415,7 @@ function runDashboard(D) {
           <div class="pace-value">${fmt(actual)} <span class="pace-of">of ${fmt(goal)}</span></div>
           <div class="pace-bar"><div class="pace-fill ${status}" style="width:${Math.min(100, pctActual).toFixed(1)}%"></div></div>
           <div class="pace-note"><span class="status-dot ${status}"></span>${statusText} ${MIDDOT} ${tail}</div>
+          ${extra || ''}
         </div>`;
     }
 
@@ -461,9 +480,19 @@ function runDashboard(D) {
         </div>`;
     }
 
+    // The total counts every booking; this says how many of them the ad
+    // budget can claim. Without it the target reads as though the ads
+    // produced all of them, when email, Linktree and referrals are in there
+    // too and no spend bought those.
+    const bookingSplit = bookingsMTD
+      ? `<div class="pace-split"><b>${paidMTD}</b> from ads ${MIDDOT} ${organicMTD} organic`
+        + (unclassifiedMTD ? ` ${MIDDOT} ${unclassifiedMTD} unclassified` : '')
+        + `</div>`
+      : '';
+
     el.innerHTML =
       paceCard('Ad Spend vs budget', spendMTD, MONTHLY_GOALS.spendBudget, fmtMoney, false) +
-      paceCard('Bookings vs target', bookingsMTD, MONTHLY_GOALS.leadsTarget, (n) => n.toLocaleString(), true) +
+      paceCard('Bookings vs target', bookingsMTD, MONTHLY_GOALS.leadsTarget, (n) => n.toLocaleString(), true, bookingSplit) +
       headroomCard();
 
     document.getElementById('pacing-note').textContent =
@@ -737,10 +766,21 @@ function runDashboard(D) {
     const withOutcome = bookings.filter(b => b.attendanceRecorded).length;
     const attended = bookings.filter(b => b.attendanceRecorded && b.attended).length;
 
+    // How many of those bookings an ad plausibly produced. costPerLead
+    // still divides by all of them, which is what the number has always
+    // meant, but the cards show this split so the denominator is not taken
+    // for "leads the ads bought".
+    const paidBooked = bookings.filter(isPaidBooking).length;
+    const organicBooked = bookings.filter(b => b.channel === 'organic').length;
+
     return {
-      spend, downloads, booked, withOutcome, attended,
+      spend, downloads, booked, withOutcome, attended, paidBooked, organicBooked,
       costPerDownload: downloads ? spend / downloads : null,
       costPerLead: booked ? spend / booked : null,
+      // What a lead costs if only ad-driven bookings count. Always the
+      // higher, more conservative figure, and the one to quote when asked
+      // what the ads are actually delivering.
+      costPerPaidLead: paidBooked ? spend / paidBooked : null,
       downloadToBooking: downloads ? (booked / downloads) * 100 : null,
       attendanceRate: withOutcome ? (attended / withOutcome) * 100 : null,
     };
@@ -766,8 +806,9 @@ function runDashboard(D) {
       ? ''
       : deltaLine(cur[key], prev ? prev[key] : null, fmt, lowerIsBetter);
 
-    const { downloads, booked, costPerDownload, costPerLead, downloadToBooking,
-      attendanceRate, withOutcome, attended } = cur;
+    const { downloads, booked, costPerDownload, costPerLead, costPerPaidLead,
+      downloadToBooking, attendanceRate, withOutcome, attended,
+      paidBooked, organicBooked } = cur;
 
     grid.innerHTML = `
       <div class="kpi">
@@ -779,7 +820,7 @@ function runDashboard(D) {
       <div class="kpi">
         <div class="l">Qualified Leads (booked)</div>
         <div class="v">${booked.toLocaleString()}</div>
-        <div class="d">meetings booked, not downloads</div>
+        <div class="d">${booked ? `<b>${paidBooked}</b> from ads ${MIDDOT} ${organicBooked} organic` : 'meetings booked, not downloads'}</div>
         ${d('booked', (n) => n.toLocaleString(), false)}
       </div>
       <div class="kpi">
@@ -791,7 +832,9 @@ function runDashboard(D) {
       <div class="kpi">
         <div class="l">Cost per Qualified Lead</div>
         <div class="v">${fmtMoney(costPerLead)}</div>
-        <div class="note">spend / booked meetings</div>
+        <div class="d">${costPerPaidLead != null && organicBooked
+          ? `${fmtMoney(costPerPaidLead)} counting ad-driven bookings only`
+          : 'spend / booked meetings'}</div>
         ${d('costPerLead', fmtMoney, true)}
       </div>
       <div class="kpi">
@@ -804,11 +847,17 @@ function runDashboard(D) {
       </div>
     `;
 
-    const unattributed = ATTRIBUTION ? ATTRIBUTION.bookings - ATTRIBUTION.bookingsAttributed : null;
+    // The old wording here claimed cost per lead counted "the attributed
+    // ones only". That is only true with a campaign filter applied: with
+    // filters open, leadsFor() keeps bookings that carry no campaign, so
+    // organic ones sit in the denominator against ad spend and pull the
+    // figure down. Say what the number actually is.
     document.getElementById('journey-week-note').textContent =
       `${fmtDate(from)} ${DASH_EN} ${fmtDate(to)}`
       + compareNote(cmp, cmpOk)
-      + (unattributed ? ` ${MIDDOT} ${unattributed} of ${ATTRIBUTION.bookings} bookings carry no campaign, so cost per lead counts spend against the attributed ones only` : '');
+      + (organicBooked && filtersAllOpen()
+        ? ` ${MIDDOT} cost per lead divides ad spend by all ${booked} bookings, ${organicBooked} of which came from unpaid sources, so it reads lower than what the ads alone cost`
+        : '');
   }
 
   function renderUnattributed() {

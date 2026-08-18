@@ -191,6 +191,10 @@ h2.sh { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spa
 .pace-fill.critical { background: var(--critical); }
 .pace-note { font-size: 11px; color: var(--ink-3); margin-top: 8px; }
 .pace-note .status-dot { margin-right: 5px; }
+/* Where a headline total is made up of parts worth keeping separate --
+   bookings the ads produced vs the ones that arrived on their own. */
+.pace-split { font-size: 11px; color: var(--ink-2); margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--hairline); }
+.pace-split b { color: var(--ink); }
 
 /* ---- booking heatmap ---- */
 .heatmap { display: flex; flex-direction: column; gap: 2px; }
