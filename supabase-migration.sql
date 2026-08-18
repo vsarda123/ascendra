@@ -1,12 +1,57 @@
--- Adds the Meta metrics that fetchMetaInsights has always requested but that
--- had nowhere to be stored, so only spend and clicks ever reached the
--- dashboard. Run once in the Supabase SQL editor
--- (Dashboard -> SQL Editor -> New query -> Run).
+-- The whole schema /api/cron/sync writes and /api/data reads. Run in the
+-- Supabase SQL editor (Dashboard -> SQL Editor -> New query -> Run).
 --
--- Safe to re-run: every statement is IF NOT EXISTS. Existing rows get the
--- defaults below and are backfilled with real numbers the next time
--- /api/cron/sync runs.
+-- Safe to re-run and safe on a fresh project: every statement is IF NOT
+-- EXISTS, and the two tables are created before anything alters them. This
+-- file used to be ALTERs only, which meant it failed outright against a
+-- project where the tables had never been created -- the exact situation
+-- where someone would reach for it.
+--
+-- Existing rows get the defaults below and are backfilled with real numbers
+-- the next time /api/cron/sync runs.
 
+-- ---------------------------------------------------------------- tables
+-- One row per campaign/audience/creative per day. Only the columns the
+-- original sync wrote are here; everything added later is an ALTER below,
+-- so this block stays identical to what an older project already has.
+create table if not exists daily_spend (
+  date               date   not null,
+  campaign           text,
+  audience           text,
+  creative           text,
+  landing_page       text,
+  spend              numeric not null default 0,
+  clicks             bigint  not null default 0,
+  landing_page_views bigint  not null default 0,
+  updated_at         timestamptz not null default now()
+);
+
+-- sync upserts with onConflict 'date,campaign,audience,creative', which
+-- needs a matching unique index or the write fails. NULLS NOT DISTINCT
+-- matters: campaign/audience/creative are null on some rows, and by default
+-- Postgres treats each null as unique, so those rows would insert a
+-- duplicate on every run instead of updating. (Needs Postgres 15+; on
+-- older versions drop that clause and accept the duplicates.)
+create unique index if not exists daily_spend_key
+  on daily_spend (date, campaign, audience, creative) nulls not distinct;
+
+-- Opt-ins and bookings share this table, told apart by `kind` below. id is
+-- built by stableId() in lib/sources.js and is what the upsert conflicts
+-- on, so it has to be the primary key.
+create table if not exists leads (
+  id             text primary key,
+  generated_date date not null,
+  campaign       text,
+  audience       text,
+  creative       text,
+  landing_page   text,
+  attended       boolean not null default false,
+  updated_at     timestamptz not null default now()
+);
+
+-- ------------------------------------------------------------- additions
+-- Meta metrics that fetchMetaInsights has always requested but that had
+-- nowhere to be stored, so only spend and clicks ever reached the dashboard.
 alter table daily_spend add column if not exists impressions        bigint  not null default 0;
 alter table daily_spend add column if not exists reach              bigint  not null default 0;
 alter table daily_spend add column if not exists inline_link_clicks bigint  not null default 0;
