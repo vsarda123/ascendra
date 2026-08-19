@@ -31,6 +31,21 @@ module.exports = async (req, res) => {
     const inSupabaseNotLive = supabaseIds.filter(id => !liveIds.includes(id));
     const inLiveNotSupabase = liveIds.filter(id => !supabaseIds.includes(id));
 
+    // Actually attempt the same delete sync.js's deleteStale() does, on
+    // just these known-stale ids, so the real Postgres/PostgREST error (if
+    // any) surfaces here instead of being swallowed into a cron response
+    // nobody can see without CRON_SECRET.
+    let deleteAttempt = null;
+    if (inSupabaseNotLive.length) {
+      const { error, count, data: delData } = await supabase
+        .from('leads')
+        .delete()
+        .eq('kind', 'booking')
+        .in('id', inSupabaseNotLive)
+        .select('id');
+      deleteAttempt = { attemptedIds: inSupabaseNotLive, error: error ? { message: error.message, code: error.code, details: error.details, hint: error.hint } : null, deletedRows: delData };
+    }
+
     res.status(200).json({
       liveSheetCount: liveIds.length,
       supabaseCount: supabaseIds.length,
@@ -38,6 +53,7 @@ module.exports = async (req, res) => {
       supabaseRows: data,
       staleInSupabaseOnly: inSupabaseNotLive,
       missingFromSupabase: inLiveNotSupabase,
+      deleteAttempt,
     });
   } catch (e) {
     res.status(500).json({ error: e.message, stack: e.stack });
