@@ -212,6 +212,27 @@ module.exports = async (req, res) => {
     if (error) errors.supabaseWriteLeads = error.message;
   }
 
+  // A row the sheet no longer has -- deleted, corrected, or a duplicate
+  // cleaned up by hand -- otherwise sits in Supabase forever, since upsert
+  // only ever adds or updates by id and never removes anything. That's how
+  // 4 bookings from 11-12 Aug stayed on the dashboard weeks after they'd
+  // been removed from the live sheet: the count matched what was synced,
+  // not what the sheet currently says. Only runs when the corresponding
+  // fetch actually succeeded and returned rows -- a failed or empty fetch
+  // must never be read as "the sheet is now empty" and used to wipe it.
+  async function deleteStale(kind, currentIds) {
+    const { data: existing, error: selErr } = await supabase.from('leads').select('id').eq('kind', kind);
+    if (selErr) { errors[`supabaseReadExisting_${kind}`] = selErr.message; return; }
+    const keep = new Set(currentIds);
+    const staleIds = (existing || []).map(r => r.id).filter(id => !keep.has(id));
+    if (staleIds.length) {
+      const { error } = await supabase.from('leads').delete().eq('kind', kind).in('id', staleIds);
+      if (error) errors[`supabaseDeleteStale_${kind}`] = error.message;
+    }
+  }
+  if (sources.sheets && leads.length) await deleteStale('optin', leads.map(l => l.id));
+  if (sources.bookings && bookings.length) await deleteStale('booking', bookings.map(b => b.id));
+
   let cfPagesDiag = null;
   if (process.env.CLICKFUNNELS_API_TOKEN && process.env.CLICKFUNNELS_SUBDOMAIN) {
     try {
