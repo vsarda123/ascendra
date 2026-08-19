@@ -375,15 +375,21 @@ function runDashboard(D) {
     const el = document.getElementById('pacing-grid');
     if (!el) return;
 
-    // The window starts where the selected range starts and runs to the end
-    // of the month that range ends in: pick 6 August and the budget paces
-    // across 6-31 August, not 1-31. Labelled with its real dates rather
-    // than a month name, so a window that is not a whole month cannot be
-    // mistaken for one -- which also keeps a long range (say 90 days)
-    // honest about pacing a monthly budget across more than a month.
+    // The window starts at the first of the anchor's month, or later if the
+    // selected range starts partway through that month: pick 6 August and
+    // the budget paces across 6-31 August, not 1-31. It never starts
+    // *earlier* than the 1st, though -- the default range is the last 90
+    // days, which reaches back 2-3 months before the current one, and this
+    // used to take that as windowStart verbatim. A $4,000 monthly budget
+    // was then compared against everything spent since May, reporting
+    // "$41,269 of $4,000" for a single month that had only actually spent
+    // a fraction of that. Labelled with its real dates rather than a month
+    // name, so a genuinely partial window (the 6-31 August case) still
+    // cannot be mistaken for a whole one.
     const anchor = state.to || TODAY;
-    const windowStart = state.from || firstOfMonthOf(anchor);
-    const windowEnd = addDaysStr(firstOfMonthOf(anchor), daysInMonthOf(anchor) - 1);
+    const monthStart = firstOfMonthOf(anchor);
+    const windowStart = (state.from && state.from > monthStart) ? state.from : monthStart;
+    const windowEnd = addDaysStr(monthStart, daysInMonthOf(anchor) - 1);
     const totalDays = daysCount(windowStart, windowEnd);
     // A window that has already finished has data for all of it; one still
     // running only up to today. Everything below keys off this rather than
@@ -530,7 +536,7 @@ function runDashboard(D) {
 
     document.getElementById('pacing-note').textContent =
       (windowComplete ? `${windowLabel}, complete (${totalDays} days)` : `${windowLabel} to date (day ${daysElapsed} of ${totalDays})`)
-      + ` ${MIDDOT} starts where your date range starts, runs to the end of that month`
+      + ` ${MIDDOT} always one calendar month -- starts where your date range starts if that's later than the 1st, otherwise the 1st, and runs to the end of that month`
       + ` ${MIDDOT} whole account, not sliced by the campaign filters`;
 
     // Day-by-day trajectory against an ideal straight-line pace, not just
