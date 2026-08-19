@@ -98,10 +98,12 @@ module.exports = async (req, res) => {
   await Promise.allSettled(tasks);
 
   const campaignIdToName = {};
+  const adIdToName = {};
   for (const r of metaRows) {
     if (r.campaignId) campaignIdToName[r.campaignId] = r.campaign;
+    if (r.adId) adIdToName[r.adId] = r.creative;
   }
-  bookings = resolveBookingAttribution(bookings, campaignIdToName);
+  bookings = resolveBookingAttribution(bookings, campaignIdToName, adIdToName);
 
   const dailySpend = mergeDailySpend(metaRows, cfByCampaign);
 
