@@ -55,13 +55,20 @@ async function verifySession(cookieValue, secret) {
 export default async function middleware(request) {
   const secret = process.env.SESSION_SECRET;
   const session = await verifySession(getCookie(request, 'session'), secret);
+  if (session) return next();
 
-  if (!session) {
-    const url = new URL(request.url);
-    const loginUrl = new URL('/api/auth/login', url.origin);
-    loginUrl.searchParams.set('next', url.pathname + url.search);
-    return Response.redirect(loginUrl.toString(), 302);
-  }
+  // A shared secret as an alternative to the Google login above -- the same
+  // pattern api/cron/sync.js already uses for CRON_SECRET. Lets a trusted
+  // script (Claude, curl, a monitoring job) read the live dashboard without
+  // running an OAuth flow that needs a real browser. Checked here, not
+  // inside api/data.js, because this middleware runs first and would
+  // otherwise redirect to login before that handler ever saw the request.
+  const apiKey = process.env.DASHBOARD_API_KEY;
+  const url = new URL(request.url);
+  const provided = request.headers.get('authorization') === `Bearer ${apiKey}` || url.searchParams.get('key') === apiKey;
+  if (apiKey && provided) return next();
 
-  return next();
+  const loginUrl = new URL('/api/auth/login', url.origin);
+  loginUrl.searchParams.set('next', url.pathname + url.search);
+  return Response.redirect(loginUrl.toString(), 302);
 }
